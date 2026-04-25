@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="PatternMatchSafetyAnalysis/PatternMatchSafetyAnalysis.csproj" />
+  <Project Path="PatternMatchSafetyRunner/PatternMatchSafetyRunner.csproj" />
+</Solution>
