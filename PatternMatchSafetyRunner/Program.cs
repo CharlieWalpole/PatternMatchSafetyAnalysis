@@ -2,14 +2,15 @@
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Analysis;
+using System.Collections.Immutable;
+using Analysis.Types;
 
-class Program
-{
-    public static string exampleProgram = 
+class Program {
+    public static string exampleProgram =
 @"
 public class A { protected int z = 0; private int w = 0; }
 public class B : A { public int y = 0; }
-public class C : A { public int x = 0; }
+public class C : A { public int x = 0; public C() {} }
 
 public class Program {
     public static void Main() {
@@ -18,29 +19,60 @@ public class Program {
         int y = x switch {
             B b => 1
         };
+        foo();
     }
+
+    public static void foo() { var x = new C(); }
 }
 ";
-    public static void Main()
-    {
+    public static void Main() {
         SyntaxTree tree = CSharpSyntaxTree.ParseText(exampleProgram);
         CompilationUnitSyntax root = tree.GetCompilationUnitRoot();
-        var compilation = CSharpCompilation.Create("HelloWorld").AddSyntaxTrees(tree);
-        var semanticModel = compilation.GetSemanticModel(tree);
+        CSharpCompilation compilation = CSharpCompilation.Create("HelloWorld").AddSyntaxTrees(tree);
+        SemanticModel semanticModel = compilation.GetSemanticModel(tree);
         if (semanticModel is null)
             throw new Exception("Semantic model was null.");
 
-        var assigner = new AbstractObjectIDAssigner(semanticModel);
-        assigner.Visit(root);
+        AbstractObjectIDAssigner assigner = new AbstractObjectIDAssigner(semanticModel);
+        MethodCollector collector = new MethodCollector(semanticModel);
+        root.Accept(assigner);
+        root.Accept(collector);
 
         foreach (var item in assigner.AbstractObjectIDsToCodeLocations) {
             Console.WriteLine($"Constructor call occurred at {item.Value} and was assigned ID {item.Key} with type {assigner.TypeMap[item.Key]}.");
-            Console.WriteLine($"ID has fields: ");
+            Console.Write($"ID has fields: ");
             foreach (var dom in assigner.HeapDomain) {
-                if(dom.Item1.Equals(item.Key))
-                    Console.WriteLine($"\t{dom.Item2}");
+                if (dom.Item1.Equals(item.Key))
+                    Console.Write($"{dom.Item2}, ");
+            }
+            Console.WriteLine();
+        }
+
+        foreach (var item in collector.MethodSet) {
+            Console.WriteLine($"Found method: {item.GetName()}.");
+
+            foreach (var func in collector.CallMap[item])
+                Console.WriteLine($"Found {(func.isMethodDecl ? "method" : "constructor")} call from {item.GetName()} to {func.GetName()}.");
+        }
+
+        Console.WriteLine("Call graph closure:");
+        foreach (var item in collector.GetCallMapTransClosure()) {
+            Console.WriteLine($"\tFrom {item.Key.GetName()} to:");
+            foreach (var dest in item.Value) {
+                Console.WriteLine($"\t\t{dest.GetName()}");
             }
         }
 
+        Console.WriteLine();
+        Console.WriteLine("Analysis order is: ");
+        int i = 0;
+        foreach (AnalysisUnit unit in collector.AnalysisOrdering) {
+            Console.WriteLine($"\tUnit number {i} containing: ");
+            foreach (var item in unit.Defns) {
+                Console.WriteLine($"\t\t{(item.isMethodDecl ? "Method" : "Constructor")}: {item.GetName()}.");
+            }
+            i++;
+        }
     }
+
 }
