@@ -20,7 +20,7 @@ public class AbstractObjectIDAssigner(SemanticModel semanticModel) : CSharpSynta
     }
 
 
-    public TypeEnv TypeMap = new();
+    public TypeEnv TypeMap = new([]);
 
 
     protected HashSet<(AbstractObjID, FieldName, IFieldSymbol)> _HeapDomain = [];
@@ -44,7 +44,7 @@ public class AbstractObjectIDAssigner(SemanticModel semanticModel) : CSharpSynta
 
         if (node.Type.Kind() == SyntaxKind.IdentifierName) {
             string val = node.Type.ChildTokens().First().Text;
-            TypeMap[currentID] = new Class(val);
+            TypeMap = TypeMap.SetType(currentID, new Class(val));
         }
         else {
             throw new Exception($"IDK: {node}");
