@@ -128,26 +128,64 @@ public record class HeapEnv(ImmutableDictionary<(AbstractObjID, FieldName), Obje
     public HeapEnv Compose(HeapEnv r) => r;
 }
 
-public record class TypeEnv(ImmutableDictionary<AbstractObjID, Type> Mapping) {
-    public TypeEnv SetType(AbstractObjID ID, Type type) {
-        if (!Mapping.ContainsKey(ID))
-            return new(Mapping.Add(ID, type));
+public record class TypeEnv(ImmutableDictionary<AbstractObjID, Class> ClassMapping, ImmutableDictionary<AbstractObjID, TypeInference> ClosureMapping) {
+    public TypeEnv SetTypeClass(AbstractObjID ID, Class type) {
+        if (!ClassMapping.ContainsKey(ID))
+            return this with { ClassMapping = ClassMapping.Add(ID, type) };
         else
-            return new (Mapping.Remove(ID).Add(ID, type));
+            return this with { ClassMapping = ClassMapping.Remove(ID).Add(ID, type) };
     }
 
-    public Type GetVar(AbstractObjID ID) {
-        Mapping.TryGetValue(ID, out Type? ret);
-        if (ret is not null)
-            return ret;
+    public TypeEnv SetTypeArrow(AbstractObjID ID, Arrow type) {
+        if (!ClosureMapping.ContainsKey(ID))
+            return this with { ClosureMapping = ClosureMapping.Add(ID, new TypeInference.Literal([type])) };
+        else
+            return this with { ClosureMapping = ClosureMapping.Remove(ID).Add(ID, new TypeInference.Literal([type])) };
+    }
+
+    public TypeEnv SetTypeArrow(AbstractObjID ID, TypeInference type) {
+        if (!ClosureMapping.ContainsKey(ID))
+            return this with { ClosureMapping = ClosureMapping.Add(ID, type) };
+        else
+            return this with { ClosureMapping = ClosureMapping.Remove(ID).Add(ID, type) };
+    }
+
+    public bool isClassObj(AbstractObjID ID) => ClassMapping.ContainsKey(ID);
+
+    public Class GetVarClass(AbstractObjID ID) {
+        if (ClassMapping.TryGetValue(ID, out Class value))
+            return value;
         else
             throw new ArgumentException($"Getting the type of an abstract object ID that does not exist; ID: {ID}");
     }
 
-    public Type this[AbstractObjID ID] {
+    public TypeInference GetVarArrow(AbstractObjID ID) {
+        if (ClosureMapping.TryGetValue(ID, out TypeInference? value1))
+            return value1;
+        else
+            throw new ArgumentException($"Getting the type of an abstract object ID that does not exist; ID: {ID}");
+    }
+
+    public TypeInference GetVar(AbstractObjID ID) => isClassObj(ID) ? new TypeInference.Literal([GetVarClass(ID)]) : GetVarArrow(ID);
+
+    public TypeInference this[AbstractObjID ID] {
         get => GetVar(ID);
         //set => SetType(ID, value);
     }
+
+    public TypeEnv GetFresh() => new(ClassMapping,
+        [.. this.ClosureMapping.Keys.Select(n => new KeyValuePair<AbstractObjID, TypeInference>(n, TypeInference.Create()))]);
+
+    /// <summary>
+    /// Assumes that the domains of the given alias environments are equal.
+    /// </summary>
+    public static IEnumerable<InferenceConstraint> operator <=(TypeEnv l, TypeEnv r)
+        => l.ClosureMapping.Select(kv => new InferenceConstraint.SubTyping(kv.Value, r.ClosureMapping[kv.Key]));
+    /// <summary>
+    /// Assumes that the domains of the given alias environments are equal.
+    /// </summary>
+    public static IEnumerable<InferenceConstraint> operator >=(TypeEnv l, TypeEnv r)
+        => r.ClosureMapping.Select(kv => new InferenceConstraint.SubTyping(kv.Value, l.ClosureMapping[kv.Key]));
 }
 
 public record class AliasEnv(ImmutableDictionary<AbstractObjID, AliasInference> Mapping) {
@@ -190,11 +228,11 @@ public record class AliasEnv(ImmutableDictionary<AbstractObjID, AliasInference> 
 }
 
 public record class Environment(StackEnv StackMap, HeapEnv HeapMap, TypeEnv TypeMap, AliasEnv AliasMap) {
-    public Environment() : this(new([]), new([]), new([]), new([])) { }
+    public Environment() : this(new([]), new([]), new([], []), new([])) { }
 
     public ObjectSet this[VarName name] => StackMap[name];
     public ObjectSet this[AbstractObjID obj, FieldName name] => HeapMap[obj, name];
-    public Type this[AbstractObjID ID] {
+    public TypeInference this[AbstractObjID ID] {
         get => TypeMap[ID];
         //set => TypeMap[ID] = value;
     }
@@ -208,13 +246,13 @@ public record class Environment(StackEnv StackMap, HeapEnv HeapMap, TypeEnv Type
     /// Assumes that the domains of the given environments are equal.
     /// </summary>
     public static IEnumerable<InferenceConstraint> operator <=(Environment l, Environment r)
-        => [.. l.StackMap <= r.StackMap, .. l.HeapMap <= r.HeapMap, .. l.AliasMap <= r.AliasMap];
+        => [.. l.StackMap <= r.StackMap, .. l.HeapMap <= r.HeapMap, ..l.TypeMap <= r.TypeMap, .. l.AliasMap <= r.AliasMap];
     /// <summary>
     /// Assumes that the domains of the given environments are equal.
     /// </summary>
     public static IEnumerable<InferenceConstraint> operator >=(Environment l, Environment r) => r <= l;
 
-    public Environment GetFresh() => new(StackMap.GetFresh(), HeapMap.GetFresh(), TypeMap, AliasMap.GetFresh());
+    public Environment GetFresh() => new(StackMap.GetFresh(), HeapMap.GetFresh(), TypeMap.GetFresh(), AliasMap.GetFresh());
 
     public Environment Push() => this with { StackMap = StackMap.Push() };
     public Environment Push(ImmutableDictionary<VarName, ObjectSet> frame) => this with { StackMap = StackMap.Push(frame) };

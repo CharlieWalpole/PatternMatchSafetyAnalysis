@@ -11,6 +11,14 @@ namespace Analysis;
 
 
 public class AnalysisVisitor : CSharpSyntaxVisitor<AnalysisResult> {
+    protected readonly SemanticModel semantics;
+
+    public AnalysisVisitor(SemanticModel semanticModel) {
+        semantics = semanticModel;
+    }
+
+
+
     [return: MaybeNull]
     public override AnalysisResult DefaultVisit(SyntaxNode node) {
         if (node is CSharpSyntaxNode csNode)
@@ -94,6 +102,18 @@ public class AnalysisVisitor : CSharpSyntaxVisitor<AnalysisResult> {
     }
 
     protected virtual AnalysisResult HandleClosure(LambdaExpressionSyntax expr, Environment Env) {
+        IEnumerable<VarName> Vc = expr.Body.GetFreeVariables(semantics);
+        ObjectInference Xr = ObjectInference.Create();
+        Dictionary<VarName, ObjectInference> StackEnv = expr.GetArgumentNames()
+            .Select(n => new KeyValuePair<VarName, ObjectInference>(n, ObjectInference.Create())).ToDictionary(); //Arguments
+        foreach (VarName capture in Vc) {
+            StackEnv.Add(capture, Env[capture]);
+        }
+        Environment In = Env with { StackMap = new StackEnv([StackEnv.ToImmutableDictionary()]) };
+        AnalysisResult res = HandleNode(expr.Body, In);
+
+        //Type map will not be update as immutable. Should type map be split? Should it be entirely inferred?
+
         throw new NotImplementedException();
     }
 

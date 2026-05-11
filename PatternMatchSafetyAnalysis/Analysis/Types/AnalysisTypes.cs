@@ -6,7 +6,7 @@ namespace Analysis.Types;
 
 public interface Type {}
 public record struct Class(ClassName Name) : Type;
-public record class Arrow(VarName[] Args, Environment Pre, Environment Post, ObjectSet Return);
+public record class Arrow(VarName[] Args, Environment Pre, Environment Post, ObjectSet Return) : Type;
 
 
 public record struct AliasData(AliasFlag Flag);
