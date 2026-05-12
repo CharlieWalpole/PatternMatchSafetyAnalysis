@@ -6,15 +6,21 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 using Environment = Analysis.Types.Environment;
+using CodeDelta = Analysis.AbstractObjectIDAssigner;
+using Type = Analysis.Types.Type;
 
 namespace Analysis;
 
 
 public class AnalysisVisitor : CSharpSyntaxVisitor<AnalysisResult> {
     protected readonly SemanticModel semantics;
+    protected CodeDelta Delta;
 
-    public AnalysisVisitor(SemanticModel semanticModel) {
+    protected Dictionary<AbstractObjID, (ImmutableHashSet<InferenceConstraint>, TypeInference)> MethodSummaries = [];
+
+    public AnalysisVisitor(SemanticModel semanticModel, CodeDelta delta) {
         semantics = semanticModel;
+        Delta = delta;
     }
 
 
@@ -69,10 +75,16 @@ public class AnalysisVisitor : CSharpSyntaxVisitor<AnalysisResult> {
     }
 
     protected virtual AnalysisResult HandleVariable(IdentifierNameSyntax expr, Environment Env) {
+        //Some method lookups may be in this case; M() and f() are syntactically identical. 
         ObjectInference ObjRet = ObjectInference.Create();
         Environment Out = Env.GetFresh();
-        ObjectInference GetVar = Env[expr.GetIdentifierName()];
-        return new AnalysisResult([GetVar <= ObjRet, .. Env <= Out], ObjRet, Out);
+        string VarName = expr.GetIdentifierName();
+        if(Env.StackMap.ContainsKey(VarName)) {
+            ObjectInference GetVar = Env[VarName];
+            return new AnalysisResult([GetVar <= ObjRet, .. Env <= Out], ObjRet, Out);
+        } else {
+            throw new NotImplementedException();
+        }
     }
 
     protected virtual AnalysisResult HandleConstructor(ObjectCreationExpressionSyntax expr, Environment Env) {
@@ -81,7 +93,38 @@ public class AnalysisVisitor : CSharpSyntaxVisitor<AnalysisResult> {
 
     protected virtual AnalysisResult HandleApplication(InvocationExpressionSyntax expr, Environment Env) {
         //Must handle both method and application rules
-        throw new NotImplementedException();
+        //Can assume that the method summary constraints have already been added. 
+
+        ObjectInference.Var X = ObjectInference.Create();
+        ObjectInference.Var R = ObjectInference.Create();
+        TypeInference.Var Z = TypeInference.Create();
+        Environment G2 = Env.GetFresh();
+        Environment Gr = Env.GetFresh();
+
+        AnalysisResult res0 = HandleNode(expr.Expression, Env);
+        
+        IEnumerable<InferenceConstraint> Cons = [..res0.Constraints];
+        Environment In = res0.EndEnv;
+        List<ObjectInference> ArgumentReturns = [];
+
+        foreach (ArgumentSyntax arg in expr.ArgumentList.Arguments) {
+            AnalysisResult res = HandleExpression(arg.Expression, In);
+            Cons = [..Cons, ..res.Constraints];
+            In = res.EndEnv;
+            ArgumentReturns.Add(res.Return);
+        }
+
+        ImmutableList<(ObjectInference, ObjectInference.Var)> Args = [..ArgumentReturns.Select(arg => (arg, ObjectInference.Create()))];
+        ObjectInference.Var Of = ObjectInference.Create();
+
+        return new AnalysisResult(
+            [
+                ..Cons, 
+                Of <= res0.Return, res0.Return <= Of,
+                .. Args.SelectMany<(ObjectInference, ObjectInference.Var), InferenceConstraint>(kv => [kv.Item1 <= kv.Item2, kv.Item2 <= kv.Item1]),
+                (ObjectInference)R <= X, 
+                new InferenceConstraint.ApplicationResolution(G2, R, Z, Gr, In, Of, [..Args.Select(kv => kv.Item2)])
+            ], X, G2);
     }
 
     protected virtual AnalysisResult HandleField(MemberAccessExpressionSyntax expr, Environment Env) {
@@ -112,9 +155,18 @@ public class AnalysisVisitor : CSharpSyntaxVisitor<AnalysisResult> {
         Environment In = Env with { StackMap = new StackEnv([StackEnv.ToImmutableDictionary()]) };
         AnalysisResult res = HandleNode(expr.Body, In);
 
-        //Type map will not be update as immutable. Should type map be split? Should it be entirely inferred?
+        if(!Delta.CodeToID.ContainsKey(expr))
+            throw new ArgumentException($"Analysing closure that was not assigned an Abstract Object ID. Node occurred at {expr.FullSpan}.");
+        AbstractObjID Of = Delta.CodeToID[expr];
 
-        throw new NotImplementedException();
+        TypeInference TOf = Env[Of];
+
+        return new AnalysisResult(
+            [
+                Of <= Xr, 
+                new Arrow([.. expr.GetArgumentNames()], In, res.EndEnv, res.Return) <= TOf,
+                .. res.Constraints
+            ], Xr, In);
     }
 
 

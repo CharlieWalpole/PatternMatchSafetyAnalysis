@@ -16,6 +16,7 @@ public class Program {
     public static void Main() {
         A x = new B();
         x = new C();
+        Func<int, int> f = i => i+1;
         int y = x switch {
             B b => 1
         };
@@ -39,13 +40,17 @@ public class Program {
         root.Accept(collector);
 
         foreach (var item in assigner.AbstractObjectIDsToCodeLocations) {
-            Console.WriteLine($"Constructor call occurred at {item.Value} and was assigned ID {item.Key} with type {assigner.TypeMap[item.Key]}.");
-            Console.Write($"ID has fields: ");
-            foreach (var dom in assigner.HeapDomain) {
-                if (dom.Item1.Equals(item.Key))
-                    Console.Write($"{dom.Item2}, ");
+            if(assigner.TypeMap.isClassObj(item.Key)) {
+                Console.WriteLine($"Constructor call occurred at {item.Value} and was assigned ID {item.Key} with type {assigner.TypeMap[item.Key]}.");
+                Console.Write($"\tID has fields: ");
+                foreach (var dom in assigner.HeapDomain) {
+                    if (dom.Item1.Equals(item.Key))
+                        Console.Write($"{dom.Item2}, ");
+                }
+                Console.WriteLine();
+            } else {
+                Console.WriteLine($"Closure definition occurred at {item.Value} and was assigned ID {item.Key}.");
             }
-            Console.WriteLine();
         }
 
         foreach (var item in collector.MethodSet) {

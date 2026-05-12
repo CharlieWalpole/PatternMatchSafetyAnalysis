@@ -25,6 +25,12 @@ public interface ObjectInference {
 
     static InferenceConstraint.ObjectInclusion operator <=(ObjectInference l, ObjectInference r) => new InferenceConstraint.ObjectInclusion(l, r);
     static InferenceConstraint.ObjectInclusion operator >=(ObjectInference l, ObjectInference r) => new InferenceConstraint.ObjectInclusion(r, l);
+
+    static InferenceConstraint.ObjectInclusion operator <=(ObjectInference l, AbstractObjID r) => new InferenceConstraint.ObjectInclusion(l, new Literal([r]));
+    static InferenceConstraint.ObjectInclusion operator >=(ObjectInference l, AbstractObjID r) => new InferenceConstraint.ObjectInclusion(new Literal([r]), l);
+
+    static InferenceConstraint.ObjectInclusion operator <=(AbstractObjID l, ObjectInference r) => new InferenceConstraint.ObjectInclusion(new Literal([l]), r);
+    static InferenceConstraint.ObjectInclusion operator >=(AbstractObjID l, ObjectInference r) => new InferenceConstraint.ObjectInclusion(r, new Literal([l]));
 }
 public interface TypeInference {
     public record class Literal(ImmutableHashSet<Type> Types) : TypeInference;
@@ -33,10 +39,16 @@ public interface TypeInference {
     public static TypeInference Create(params Type[] Types) => new Literal([.. Types]);
     public static TypeInference Create(IEnumerable<Type> Types) => new Literal([.. Types]);
     private static int currentID = 0;
-    public static TypeInference Create() => new Var(++currentID);
+    public static TypeInference.Var Create() => new Var(++currentID);
 
     static InferenceConstraint operator <=(TypeInference l, TypeInference r) => new InferenceConstraint.SubTyping(l, r);
     static InferenceConstraint operator >=(TypeInference l, TypeInference r) => new InferenceConstraint.SubTyping(r, l);
+
+    static InferenceConstraint.SubTyping operator <=(TypeInference l, Type r) => new InferenceConstraint.SubTyping(l, new Literal([r]));
+    static InferenceConstraint.SubTyping operator >=(TypeInference l, Type r) => new InferenceConstraint.SubTyping(new Literal([r]), l);
+
+    static InferenceConstraint.SubTyping operator <=(Type l, TypeInference r) => new InferenceConstraint.SubTyping(new Literal([l]), r);
+    static InferenceConstraint.SubTyping operator >=(Type l, TypeInference r) => new InferenceConstraint.SubTyping(r, new Literal([l]));
 }
 public interface AliasInference {
     public record class Literal(Alias Flag) : AliasInference;

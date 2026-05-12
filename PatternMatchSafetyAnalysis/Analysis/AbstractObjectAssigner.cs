@@ -33,22 +33,86 @@ public class AbstractObjectIDAssigner(SemanticModel semanticModel) : CSharpSynta
         }
     }
 
+    protected Dictionary<SyntaxNode, AbstractObjID> _CodeToID = [];
+    protected Optional<ImmutableDictionary<SyntaxNode, AbstractObjID>> __CodeToID = new();
+    public ImmutableDictionary<SyntaxNode, AbstractObjID> CodeToID {
+        get {
+            if (!__CodeToID.HasValue)
+                __CodeToID = new([.. _CodeToID]);
+            return __CodeToID.Value;
+        }
+    }
+
+    protected HashSet<AbstractObjID> _MethodObjects = [];
+    protected Optional<ImmutableHashSet<AbstractObjID>> __MethodObjects = new();
+    public ImmutableHashSet<AbstractObjID> MethodObjects {
+        get {
+            if (!__MethodObjects.HasValue)
+                __MethodObjects = new([.. _MethodObjects]);
+            return __MethodObjects.Value;
+        }
+    }
+
+    protected HashSet<AbstractObjID> _ClosureObjects = [];
+    protected Optional<ImmutableHashSet<AbstractObjID>> __ClosureObjects = new();
+    public ImmutableHashSet<AbstractObjID> ClosureObjects {
+        get {
+            if (!__ClosureObjects.HasValue)
+                __ClosureObjects = new([.. _ClosureObjects]);
+            return __ClosureObjects.Value;
+        }
+    }
+
+    protected HashSet<AbstractObjID> _ClassObjects = [];
+    protected Optional<ImmutableHashSet<AbstractObjID>> __ClassObjects = new();
+    public ImmutableHashSet<AbstractObjID> ClassObjects {
+        get {
+            if (!__ClassObjects.HasValue)
+                __ClassObjects = new([.. _ClassObjects]);
+            return __ClassObjects.Value;
+        }
+    }
+
+
     protected SemanticModel semanticModel = semanticModel;
     protected AbstractObjID nextID = 0;
 
 
-	  public override void VisitSimpleLambdaExpression(SimpleLambdaExpressionSyntax node) {
-			base.VisitSimpleLambdaExpression(node);
-	  }
+	public override void VisitSimpleLambdaExpression(SimpleLambdaExpressionSyntax node) {
+        AbstractObjID currentID = nextID;
+        nextID++;
+        _AbstractObjectIDsToCodeLocations.Add(currentID, node.Span);
+        _CodeToID.Add(node, currentID);
+        _ClosureObjects.Add(currentID);
+        TypeMap = TypeMap.SetTypeArrow(currentID, TypeInference.Create());
+    }
 
-	  public override void VisitParenthesizedLambdaExpression(ParenthesizedLambdaExpressionSyntax node) {
-			base.VisitParenthesizedLambdaExpression(node);
-	  }
+	public override void VisitParenthesizedLambdaExpression(ParenthesizedLambdaExpressionSyntax node) {
+        AbstractObjID currentID = nextID;
+        nextID++;
+        _AbstractObjectIDsToCodeLocations.Add(currentID, node.Span);
+        _CodeToID.Add(node, currentID);
+        _ClosureObjects.Add(currentID);
+        TypeMap = TypeMap.SetTypeArrow(currentID, TypeInference.Create());
+    }
+
+    public override void VisitMethodDeclaration(MethodDeclarationSyntax node) {
+        AbstractObjID currentID = nextID;
+        nextID++;
+        _AbstractObjectIDsToCodeLocations.Add(currentID, node.Span);
+        _CodeToID.Add(node, currentID);
+        _MethodObjects.Add(currentID);
+        TypeMap = TypeMap.SetTypeArrow(currentID, TypeInference.Create());
+
+        base.VisitMethodDeclaration(node);
+    }
 
     public override void VisitObjectCreationExpression(ObjectCreationExpressionSyntax node) {
         AbstractObjID currentID = nextID;
         nextID++;
         _AbstractObjectIDsToCodeLocations.Add(currentID, node.Span);
+        _CodeToID.Add(node, currentID);
+        _ClassObjects.Add(currentID);
 
         if (node.Type.Kind() == SyntaxKind.IdentifierName) {
             string val = node.Type.ChildTokens().First().Text;
