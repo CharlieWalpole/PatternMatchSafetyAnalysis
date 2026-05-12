@@ -71,7 +71,7 @@ public interface InferenceConstraint {
     public record class SubTyping(TypeInference l, TypeInference r) : InferenceConstraint;
     public record class HeapLookup(ObjectInference.Var Out, Environment Env, ObjectInference.Var Obj, FieldName Name) : InferenceConstraint;
     public record class HeapUpdate(Environment Out, Environment In, ObjectInference.Literal ObjIn, FieldName Name, ObjectInference ObjTo) : InferenceConstraint;
-    public record class TypeLookup(Environment Env, ObjectInference.Var Objs) : InferenceConstraint;
+    public record class TypeLookup(TypeInference.Var TypeOut, Environment Env, ObjectInference.Var Objs) : InferenceConstraint;
     public record class Restriction(ObjectInference.Var Out, Environment Env, ObjectInference.Var In, Type Tau) : InferenceConstraint;
     public record class ApplicationResolution(
         Environment EnvOut, ObjectInference.Var ObjOut,

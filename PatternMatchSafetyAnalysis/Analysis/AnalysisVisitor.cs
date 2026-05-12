@@ -187,24 +187,73 @@ public class AnalysisVisitor : CSharpSyntaxVisitor<AnalysisResult> {
     protected virtual AnalysisResult HandleSequence(IEnumerable<StatementSyntax> Stmts, Environment Env) {
         Environment In = Env;
         IEnumerable<InferenceConstraint> constraints = [];
-        ObjectInference ret = ObjectInference.Empty;
+        ObjectInference ret = ObjectInference.Create();
 
         foreach (StatementSyntax stmt in Stmts) {
             AnalysisResult res = HandleStatement(stmt, In);
             In = res.EndEnv;
             constraints = constraints.Append(res.Constraints);
-            ret = res.Return;
+            constraints = [..constraints, res.Return <= ret];
         }
 
         return new AnalysisResult([.. constraints], ret, In);
     }
 
     protected virtual AnalysisResult HandleIf(IfStatementSyntax stmt, Environment Env) {
-        throw new NotImplementedException();
+        
+        TypeInference.Var X = TypeInference.Create();
+        ObjectInference.Var Guard = ObjectInference.Create();
+
+        AnalysisResult resG = HandleExpression(stmt.Condition, Env);
+        AnalysisResult resIf = HandleStatement(stmt.Statement, resG.EndEnv);
+
+        Environment Out = resIf.EndEnv.GetFresh();
+        ObjectInference OutObj = ObjectInference.Create();
+
+        IEnumerable<InferenceConstraint> Cons = [
+            resG.Return <= Guard, Guard <= resG.Return,
+            new InferenceConstraint.TypeLookup(X, resG.EndEnv, Guard),
+            (TypeInference)X <= new Class("Bool"),
+            ..resG.Constraints,
+            ..resIf.Constraints,
+            ..resIf.EndEnv <= Out,
+            resIf.Return <= OutObj
+        ];
+
+        if(stmt.Else is not null) {
+            AnalysisResult resElse = HandleStatement(stmt.Else.Statement, resG.EndEnv);
+            Cons = [
+                ..Cons,
+                ..resElse.Constraints,
+                ..resElse.EndEnv <= Out,
+                resElse.Return <= OutObj
+            ];
+        }
+
+        return new AnalysisResult([..Cons], OutObj, Out);
     }
 
     protected virtual AnalysisResult HandleWhile(WhileStatementSyntax stmt, Environment Env) {
-        throw new NotImplementedException();
+        TypeInference.Var X = TypeInference.Create();
+        ObjectInference.Var Guard = ObjectInference.Create();
+
+        AnalysisResult resG = HandleExpression(stmt.Condition, Env);
+
+        Environment Out = resG.EndEnv.GetFresh();
+
+        AnalysisResult Body = HandleStatement(stmt.Statement, Out);
+
+        IEnumerable<InferenceConstraint> Cons = [
+            resG.Return <= Guard, Guard <= resG.Return,
+            new InferenceConstraint.TypeLookup(X, resG.EndEnv, Guard),
+            (TypeInference)X <= new Class("Bool"),
+            ..Body.EndEnv <= Out, ..Out <= Body.EndEnv,
+            ..Body.EndEnv <= Env,
+            ..resG.EndEnv <= Out,
+            ..resG.Constraints, ..Body.Constraints
+        ];
+
+        return new AnalysisResult([..Cons], Body.Return, Out);
     }
 
     protected virtual AnalysisResult HandleMatch(SwitchStatementSyntax stmt, Environment Env) {
