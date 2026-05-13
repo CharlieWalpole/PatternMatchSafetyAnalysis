@@ -12,8 +12,8 @@ public record class Arrow(VarName[] Args, Environment Pre, Environment Post, Obj
 public record struct AliasData(AliasFlag Flag);
 public enum AliasFlag { S, M }
 
-
-public interface ObjectInference {
+public interface InferenceVariable {}
+public interface ObjectInference : InferenceVariable {
     public record class Literal(ImmutableHashSet<AbstractObjID> Objects) : ObjectInference;
     public record class Var(int ID) : ObjectInference;
 
@@ -32,7 +32,7 @@ public interface ObjectInference {
     static InferenceConstraint.ObjectInclusion operator <=(AbstractObjID l, ObjectInference r) => new InferenceConstraint.ObjectInclusion(new Literal([l]), r);
     static InferenceConstraint.ObjectInclusion operator >=(AbstractObjID l, ObjectInference r) => new InferenceConstraint.ObjectInclusion(r, new Literal([l]));
 }
-public interface TypeInference {
+public interface TypeInference : InferenceVariable {
     public record class Literal(ImmutableHashSet<Type> Types) : TypeInference;
     public record class Var(int ID) : TypeInference;
 
@@ -50,7 +50,7 @@ public interface TypeInference {
     static InferenceConstraint.SubTyping operator <=(Type l, TypeInference r) => new InferenceConstraint.SubTyping(new Literal([l]), r);
     static InferenceConstraint.SubTyping operator >=(Type l, TypeInference r) => new InferenceConstraint.SubTyping(r, new Literal([l]));
 }
-public interface AliasInference {
+public interface AliasInference : InferenceVariable {
     public record class Literal(Alias Flag) : AliasInference;
     public record class Var(int ID) : AliasInference;
 
@@ -66,18 +66,53 @@ public interface AliasInference {
 
 
 public interface InferenceConstraint {
-    public record class ObjectInclusion(ObjectInference l, ObjectInference r) : InferenceConstraint;
-    public record class AliasBounding(AliasInference l, AliasInference r) : InferenceConstraint;
-    public record class SubTyping(TypeInference l, TypeInference r) : InferenceConstraint;
-    public record class HeapLookup(ObjectInference.Var Out, Environment Env, ObjectInference.Var Obj, FieldName Name) : InferenceConstraint;
-    public record class HeapUpdate(Environment Out, Environment In, ObjectInference.Literal ObjIn, FieldName Name, ObjectInference ObjTo) : InferenceConstraint;
-    public record class TypeLookup(TypeInference.Var TypeOut, Environment Env, ObjectInference.Var Objs) : InferenceConstraint;
-    public record class Restriction(ObjectInference.Var Out, Environment Env, ObjectInference.Var In, Type Tau) : InferenceConstraint;
+    InferenceConstraint Substitute(IDictionary<InferenceVariable, InferenceVariable> mapping);
+
+    public record class ObjectInclusion(ObjectInference l, ObjectInference r) : InferenceConstraint {
+        public InferenceConstraint Substitute(IDictionary<InferenceVariable, InferenceVariable> mapping) =>
+            new ObjectInclusion((ObjectInference)mapping.GetOrDefault(l, l), (ObjectInference)mapping.GetOrDefault(r, r));
+    }
+    public record class AliasBounding(AliasInference l, AliasInference r) : InferenceConstraint {
+        public InferenceConstraint Substitute(IDictionary<InferenceVariable, InferenceVariable> mapping) =>
+            new AliasBounding((AliasInference)mapping.GetOrDefault(l, l), (AliasInference)mapping.GetOrDefault(r, r));
+    }
+    public record class SubTyping(TypeInference l, TypeInference r) : InferenceConstraint {
+        public InferenceConstraint Substitute(IDictionary<InferenceVariable, InferenceVariable> mapping) =>
+        new SubTyping((TypeInference)mapping.GetOrDefault(l, l), (TypeInference)mapping.GetOrDefault(l, l));
+    }
+    public record class HeapLookup(ObjectInference.Var Out, Environment Env, ObjectInference.Var Obj, FieldName Name) : InferenceConstraint {
+        public InferenceConstraint Substitute(IDictionary<InferenceVariable, InferenceVariable> mapping) => 
+            new HeapLookup((ObjectInference.Var)mapping.GetOrDefault(Out, Out), Env.Substitute(mapping), (ObjectInference.Var)mapping.GetOrDefault(Obj, Obj), Name);
+    }
+
+    public record class HeapUpdate(Environment Out, Environment In, ObjectInference.Var ObjIn, FieldName Name, ObjectInference ObjTo) : InferenceConstraint {
+        public InferenceConstraint Substitute(IDictionary<InferenceVariable, InferenceVariable> mapping) =>
+            new HeapUpdate(Out.Substitute(mapping), In.Substitute(mapping), (ObjectInference.Var)mapping.GetOrDefault(ObjIn, ObjIn), Name, (ObjectInference)mapping.GetOrDefault(ObjTo, ObjTo));
+    }
+
+    public record class TypeLookup(TypeInference.Var TypeOut, Environment Env, ObjectInference.Var Objs) : InferenceConstraint {
+        public InferenceConstraint Substitute(IDictionary<InferenceVariable, InferenceVariable> mapping) =>
+            new TypeLookup((TypeInference.Var)mapping.GetOrDefault(TypeOut, TypeOut), Env.Substitute(mapping), (ObjectInference.Var)mapping.GetOrDefault(Objs, Objs));
+    }
+
+    public record class Restriction(ObjectInference.Var Out, Environment Env, ObjectInference.Var In, Type Tau) : InferenceConstraint {
+        public InferenceConstraint Substitute(IDictionary<InferenceVariable, InferenceVariable> mapping) =>
+            new Restriction((ObjectInference.Var)mapping.GetOrDefault(Out, Out), Env.Substitute(mapping), (ObjectInference.Var)mapping.GetOrDefault(In, In), Tau);
+    }
+
     public record class ApplicationResolution(
         Environment EnvOut, ObjectInference.Var ObjOut,
         TypeInference.Var TypeInternal, Environment EnvInternal,
         Environment EnvIn, ObjectInference.Var Funcs, ImmutableArray<ObjectInference.Var> Arguments
-    ) : InferenceConstraint;
+    ) : InferenceConstraint {
+        public InferenceConstraint Substitute(IDictionary<InferenceVariable, InferenceVariable> mapping) =>
+            new ApplicationResolution(
+                EnvOut.Substitute(mapping), (ObjectInference.Var)mapping.GetOrDefault(ObjOut, ObjOut),
+                (TypeInference.Var)mapping.GetOrDefault(TypeInternal, TypeInternal), EnvInternal.Substitute(mapping),
+                EnvIn.Substitute(mapping), (ObjectInference.Var)mapping.GetOrDefault(Funcs, Funcs), [..Arguments.Select(a => (ObjectInference.Var)mapping.GetOrDefault(a, a))]
+            );
+    }
+
 }
 
 public record class AnalysisResult(ImmutableHashSet<InferenceConstraint> Constraints, ObjectInference Return, Environment EndEnv);

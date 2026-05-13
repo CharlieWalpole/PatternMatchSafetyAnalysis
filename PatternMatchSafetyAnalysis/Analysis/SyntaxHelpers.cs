@@ -9,6 +9,10 @@ public static class SyntaxHelper {
     public static string GetMethodName(this MethodDeclarationSyntax method) => method.Identifier.ValueText;
     public static string GetConstructorType(this ConstructorDeclarationSyntax cstr) => cstr.Identifier.ValueText;
     public static string GetIdentifierName(this IdentifierNameSyntax var) => var.Identifier.ValueText;
+    public static string GetFieldName(this FieldDeclarationSyntax f) => 
+        f.Declaration.Variables.Last().Identifier.ValueText;
+    public static IEnumerable<string> GetFieldPath(this FieldDeclarationSyntax f) =>
+        ImmutableArray<string>.Empty.AddRange(f.Declaration.Variables.Select(v => v.Identifier.ValueText))[0..(f.Declaration.Variables.Count-1)];
     public static IEnumerable<VarName> GetFreeVariables(this SyntaxNode node, SemanticModel semantics) =>
         semantics.AnalyzeDataFlow(node).CapturedInside.Select(sym => sym.Name).Where(n => n is not null);
 
@@ -51,6 +55,11 @@ public static class SyntaxHelper {
 
         zs = [.. ret];
         return ret.Count > 0;
+    }
+
+    public static B GetOrDefault<A, B>(this IDictionary<A,B> mapping, A key, B def) {
+        if(mapping.TryGetValue(key, out B? value)) return value;
+        return def;
     }
 
 }
