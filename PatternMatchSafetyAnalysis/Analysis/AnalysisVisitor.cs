@@ -102,7 +102,37 @@ public class AnalysisVisitor : CSharpSyntaxVisitor<AnalysisResult> {
     //This is an expression for some reason.
     //Must handle both stack and heap Updates.
     protected virtual AnalysisResult HandleAssign(AssignmentExpressionSyntax stmt, Environment Env) {
-        throw new NotImplementedException();
+        if(stmt.Left is IdentifierNameSyntax v) {
+            AnalysisResult res = HandleNode(stmt.Right, Env);
+            if(Env.StackMap.ContainsKey(v.GetIdentifierName())) { //Stack Assignment
+                ObjectInference.Var Out = ObjectInference.Create();
+                return new AnalysisResult([..res.Constraints, res.Return <= Out, Out <= res.Return], Out, res.EndEnv with {StackMap = res.EndEnv.StackMap.SetVar(v.Identifier.ValueText, Out) });
+            } else { //implicit 'this' field update
+                AnalysisResult l = HandleNode(stmt.Left, Env);
+                AnalysisResult r = HandleNode(stmt.Right, l.EndEnv);
+                ObjectInference.Var Out = ObjectInference.Create();
+                Environment ret = r.EndEnv.GetFresh();
+                return new AnalysisResult(
+                    [..l.Constraints, ..r.Constraints, l.Return <= Out, Out <= l.Return,
+                    new InferenceConstraint.HeapUpdate(ret, r.EndEnv, Out, "this", r.Return)],
+                    Out,
+                    ret
+                );
+            }
+        } else if(stmt.Left is MemberAccessExpressionSyntax expr) { //Heap Update
+            AnalysisResult l = HandleNode(expr.Expression, Env);
+            AnalysisResult r = HandleNode(stmt.Right, l.EndEnv);
+            ObjectInference.Var Out = ObjectInference.Create();
+            Environment ret = r.EndEnv.GetFresh();
+            return new AnalysisResult(
+                [..l.Constraints, ..r.Constraints, l.Return <= Out, Out <= l.Return,
+                new InferenceConstraint.HeapUpdate(ret, r.EndEnv, Out, expr.Name.Identifier.ValueText, r.Return)],
+                Out,
+                ret
+            );
+        } else {
+            throw new NotImplementedException($"Unknown LHS to an assignment at {stmt.FullSpan} of syntax kind: {stmt.Left.Kind}.");
+        }
     }
 
     protected virtual AnalysisResult HandleVariable(IdentifierNameSyntax expr, Environment Env) {
