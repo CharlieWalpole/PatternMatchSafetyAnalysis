@@ -116,3 +116,9 @@ public interface InferenceConstraint {
 }
 
 public record class AnalysisResult(ImmutableHashSet<InferenceConstraint> Constraints, ObjectInference Return, Environment EndEnv);
+
+public record class MethodSummary(
+    ImmutableHashSet<InferenceVariable> InferenceVariables, //Contains all inference variables involved in the analysis of a method; including 'ThisVariable' and 'MethodType'
+    ObjectInference.Var ThisVariable,
+    ImmutableHashSet<InferenceConstraint> Constraints,
+    TypeInference MethodType);

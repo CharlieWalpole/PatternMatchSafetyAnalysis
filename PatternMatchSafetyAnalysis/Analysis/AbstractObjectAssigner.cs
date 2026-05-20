@@ -78,7 +78,7 @@ public class AbstractObjectIDAssigner(SemanticModel semanticModel) : CSharpSynta
     protected AbstractObjID nextID = 0;
 
 
-	public override void VisitSimpleLambdaExpression(SimpleLambdaExpressionSyntax node) {
+    public override void VisitSimpleLambdaExpression(SimpleLambdaExpressionSyntax node) {
         AbstractObjID currentID = nextID;
         nextID++;
         _AbstractObjectIDsToCodeLocations.Add(currentID, node.Span);
@@ -87,7 +87,7 @@ public class AbstractObjectIDAssigner(SemanticModel semanticModel) : CSharpSynta
         TypeMap = TypeMap.SetTypeArrow(currentID, TypeInference.Create());
     }
 
-	public override void VisitParenthesizedLambdaExpression(ParenthesizedLambdaExpressionSyntax node) {
+    public override void VisitParenthesizedLambdaExpression(ParenthesizedLambdaExpressionSyntax node) {
         AbstractObjID currentID = nextID;
         nextID++;
         _AbstractObjectIDsToCodeLocations.Add(currentID, node.Span);
@@ -105,6 +105,17 @@ public class AbstractObjectIDAssigner(SemanticModel semanticModel) : CSharpSynta
         TypeMap = TypeMap.SetTypeArrow(currentID, TypeInference.Create());
 
         base.VisitMethodDeclaration(node);
+    }
+
+    public override void VisitConstructorDeclaration(ConstructorDeclarationSyntax node) {
+        AbstractObjID currentID = nextID;
+        nextID++;
+        _AbstractObjectIDsToCodeLocations.Add(currentID, node.Span);
+        _CodeToID.Add(node, currentID);
+        _MethodObjects.Add(currentID);
+        TypeMap = TypeMap.SetTypeArrow(currentID, TypeInference.Create());
+
+        base.VisitConstructorDeclaration(node);
     }
 
     public override void VisitObjectCreationExpression(ObjectCreationExpressionSyntax node) {
@@ -165,5 +176,13 @@ public class AbstractObjectIDAssigner(SemanticModel semanticModel) : CSharpSynta
                 }
             }
         }
+    }
+
+    public IEnumerable<AbstractObjID> GetConstructorFromCreationExpression(ObjectCreationExpressionSyntax node) {
+        var info = semanticModel.GetSymbolInfo(node);
+        return info.Symbol.Cons(info.CandidateSymbols).Where(sym => sym is not null).Select(sym => sym!)
+            .SelectMany(sym => sym.DeclaringSyntaxReferences)
+            .Select(r => r.GetSyntax())
+            .Select(n => CodeToID[n]);
     }
 }
