@@ -28,6 +28,9 @@ public static class SyntaxHelper {
         }
     }
 
+    public static IEnumerable<VarName> GetArgumentNames(this MethodDeclarationSyntax node) =>
+        node.ParameterList.Parameters.Select(p => p.Identifier.ValueText);
+
 
     public static IEnumerable<T> Cons<T>(this T x, IEnumerable<T> xs) {
         yield return x;

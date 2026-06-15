@@ -67,37 +67,68 @@ public interface AliasInference : InferenceVariable {
 
 public interface InferenceConstraint {
     InferenceConstraint Substitute(IDictionary<InferenceVariable, InferenceVariable> mapping);
+    IEnumerable<InferenceConstraint> Normalise();
 
-    public record class ObjectInclusion(ObjectInference l, ObjectInference r) : InferenceConstraint {
-        public InferenceConstraint Substitute(IDictionary<InferenceVariable, InferenceVariable> mapping) =>
-            new ObjectInclusion((ObjectInference)mapping.GetOrDefault(l, l), (ObjectInference)mapping.GetOrDefault(r, r));
+    public interface PartialOrder<T, L> : InferenceConstraint where T : PartialOrder<T, L> where L : InferenceVariable {
+        L l { get; init; }
+        L r { get; init; }
+        static abstract T Transitivity(T l, T r);
+        static virtual bool isTransitive(T l, T r) => l.r.Equals(r.l);
     }
-    public record class AliasBounding(AliasInference l, AliasInference r) : InferenceConstraint {
+
+    public record class ObjectInclusion(ObjectInference l, ObjectInference r) : PartialOrder<ObjectInclusion, ObjectInference> {
+        public static ObjectInclusion Transitivity(ObjectInclusion l, ObjectInclusion r) =>
+            new ObjectInclusion(l.l, r.r);
+
+        public IEnumerable<InferenceConstraint> Normalise() => [this];
+
         public InferenceConstraint Substitute(IDictionary<InferenceVariable, InferenceVariable> mapping) =>
-            new AliasBounding((AliasInference)mapping.GetOrDefault(l, l), (AliasInference)mapping.GetOrDefault(r, r));
+        new ObjectInclusion((ObjectInference)mapping.GetOrDefault(l, l), (ObjectInference)mapping.GetOrDefault(r, r));
     }
-    public record class SubTyping(TypeInference l, TypeInference r) : InferenceConstraint {
+    public record class AliasBounding(AliasInference l, AliasInference r) : PartialOrder<AliasBounding, AliasInference> {
+        public static AliasBounding Transitivity(AliasBounding l, AliasBounding r) =>
+            new AliasBounding(l.l, r.r);
+
+        public IEnumerable<InferenceConstraint> Normalise() => [this];
+
+        public InferenceConstraint Substitute(IDictionary<InferenceVariable, InferenceVariable> mapping) =>
+        new AliasBounding((AliasInference)mapping.GetOrDefault(l, l), (AliasInference)mapping.GetOrDefault(r, r));
+    }
+    public record class SubTyping(TypeInference l, TypeInference r) : PartialOrder<SubTyping, TypeInference> {
+        public static SubTyping Transitivity(SubTyping l, SubTyping r) =>
+            new SubTyping(l.l, r.r);
+
+        public IEnumerable<InferenceConstraint> Normalise() => [this];
+
         public InferenceConstraint Substitute(IDictionary<InferenceVariable, InferenceVariable> mapping) =>
         new SubTyping((TypeInference)mapping.GetOrDefault(l, l), (TypeInference)mapping.GetOrDefault(l, l));
     }
     public record class HeapLookup(ObjectInference.Var Out, Environment Env, ObjectInference.Var Obj, FieldName Name) : InferenceConstraint {
-        public InferenceConstraint Substitute(IDictionary<InferenceVariable, InferenceVariable> mapping) => 
+        public IEnumerable<InferenceConstraint> Normalise() => [this];
+
+        public InferenceConstraint Substitute(IDictionary<InferenceVariable, InferenceVariable> mapping) =>
             new HeapLookup((ObjectInference.Var)mapping.GetOrDefault(Out, Out), Env.Substitute(mapping), (ObjectInference.Var)mapping.GetOrDefault(Obj, Obj), Name);
     }
 
     public record class HeapUpdate(Environment Out, Environment In, ObjectInference.Var ObjIn, FieldName Name, ObjectInference ObjTo) : InferenceConstraint {
+        public IEnumerable<InferenceConstraint> Normalise() => [this];
+
         public InferenceConstraint Substitute(IDictionary<InferenceVariable, InferenceVariable> mapping) =>
-            new HeapUpdate(Out.Substitute(mapping), In.Substitute(mapping), (ObjectInference.Var)mapping.GetOrDefault(ObjIn, ObjIn), Name, (ObjectInference)mapping.GetOrDefault(ObjTo, ObjTo));
+        new HeapUpdate(Out.Substitute(mapping), In.Substitute(mapping), (ObjectInference.Var)mapping.GetOrDefault(ObjIn, ObjIn), Name, (ObjectInference)mapping.GetOrDefault(ObjTo, ObjTo));
     }
 
     public record class TypeLookup(TypeInference.Var TypeOut, Environment Env, ObjectInference.Var Objs) : InferenceConstraint {
+        public IEnumerable<InferenceConstraint> Normalise() => [this];
+
         public InferenceConstraint Substitute(IDictionary<InferenceVariable, InferenceVariable> mapping) =>
-            new TypeLookup((TypeInference.Var)mapping.GetOrDefault(TypeOut, TypeOut), Env.Substitute(mapping), (ObjectInference.Var)mapping.GetOrDefault(Objs, Objs));
+        new TypeLookup((TypeInference.Var)mapping.GetOrDefault(TypeOut, TypeOut), Env.Substitute(mapping), (ObjectInference.Var)mapping.GetOrDefault(Objs, Objs));
     }
 
     public record class Restriction(ObjectInference.Var Out, Environment Env, ObjectInference.Var In, Type Tau) : InferenceConstraint {
+        public IEnumerable<InferenceConstraint> Normalise() => [this];
+
         public InferenceConstraint Substitute(IDictionary<InferenceVariable, InferenceVariable> mapping) =>
-            new Restriction((ObjectInference.Var)mapping.GetOrDefault(Out, Out), Env.Substitute(mapping), (ObjectInference.Var)mapping.GetOrDefault(In, In), Tau);
+        new Restriction((ObjectInference.Var)mapping.GetOrDefault(Out, Out), Env.Substitute(mapping), (ObjectInference.Var)mapping.GetOrDefault(In, In), Tau);
     }
 
     public record class ApplicationResolution(
@@ -105,12 +136,35 @@ public interface InferenceConstraint {
         TypeInference.Var TypeInternal, Environment EnvInternal,
         Environment EnvIn, ObjectInference.Var Funcs, ImmutableArray<ObjectInference.Var> Arguments
     ) : InferenceConstraint {
+        public IEnumerable<InferenceConstraint> Normalise() => [this];
+
         public InferenceConstraint Substitute(IDictionary<InferenceVariable, InferenceVariable> mapping) =>
-            new ApplicationResolution(
-                EnvOut.Substitute(mapping), (ObjectInference.Var)mapping.GetOrDefault(ObjOut, ObjOut),
-                (TypeInference.Var)mapping.GetOrDefault(TypeInternal, TypeInternal), EnvInternal.Substitute(mapping),
-                EnvIn.Substitute(mapping), (ObjectInference.Var)mapping.GetOrDefault(Funcs, Funcs), [..Arguments.Select(a => (ObjectInference.Var)mapping.GetOrDefault(a, a))]
-            );
+        new ApplicationResolution(
+            EnvOut.Substitute(mapping), (ObjectInference.Var)mapping.GetOrDefault(ObjOut, ObjOut),
+            (TypeInference.Var)mapping.GetOrDefault(TypeInternal, TypeInternal), EnvInternal.Substitute(mapping),
+            EnvIn.Substitute(mapping), (ObjectInference.Var)mapping.GetOrDefault(Funcs, Funcs), [.. Arguments.Select(a => (ObjectInference.Var)mapping.GetOrDefault(a, a))]
+        );
+    }
+
+    public record class Conditional(ImmutableList<SubTyping> GuardType, ImmutableList<AliasBounding> GuardAlias, ImmutableList<InferenceConstraint> Body) : InferenceConstraint {
+        public InferenceConstraint Substitute(IDictionary<InferenceVariable, InferenceVariable> mapping) =>
+            new Conditional([.. GuardType.Select(c => (SubTyping)c.Substitute(mapping))],
+                [.. GuardAlias.Select(c => (AliasBounding)c.Substitute(mapping))],
+             [.. Body.Select(c => c.Substitute(mapping))]);
+
+        public IEnumerable<InferenceConstraint> Normalise() {
+            if (GuardType.Count + GuardAlias.Count == 0)
+                return Body;
+            List<InferenceConstraint> norms = [];
+            List<Conditional> others = [];
+            foreach (InferenceConstraint constraint in Body.SelectMany(c => c.Normalise())) {
+                if (constraint is Conditional c)
+                    others.Add(new Conditional(GuardType.AddRange(c.GuardType), GuardAlias.AddRange(c.GuardAlias), c.Body));
+                else
+                    norms.Add(constraint);
+            }
+            return [new Conditional(GuardType, GuardAlias, [.. norms]), .. others];
+        }
     }
 
 }

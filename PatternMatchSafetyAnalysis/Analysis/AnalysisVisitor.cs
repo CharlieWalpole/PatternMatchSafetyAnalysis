@@ -8,6 +8,9 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Environment = Analysis.Types.Environment;
 using CodeDelta = Analysis.AbstractObjectIDAssigner;
 using Type = Analysis.Types.Type;
+using System.Diagnostics;
+using System.Data;
+using System.Reflection.Metadata;
 
 namespace Analysis;
 
@@ -64,7 +67,14 @@ public class AnalysisVisitor : CSharpSyntaxVisitor<AnalysisResult> {
         return null;
     }
 
-    protected virtual AnalysisResult HandleNode(CSharpSyntaxNode node) => HandleNode(node, new Environment());
+    protected virtual AnalysisResult HandleNode(CSharpSyntaxNode node) => HandleNode(node, MakeInitialEnvironment());
+
+    protected virtual Environment MakeInitialEnvironment() => new Environment(
+        new StackEnv([]),
+        new HeapEnv(Delta.HeapDomain.Select(kv => new KeyValuePair<(AbstractObjID, FieldName), ObjectSet>((kv.Item1, kv.Item2), ObjectInference.Create())).ToImmutableDictionary()),
+        Delta.TypeMap,
+        new AliasEnv(Delta.CodeToID.Values.Select(id => new KeyValuePair<AbstractObjID, AliasInference>(id, AliasInference.Create())).ToImmutableDictionary())
+    );
 
     public virtual AnalysisResult HandleNode(CSharpSyntaxNode node, Environment Env) => node switch {
         ExpressionSyntax expr => HandleExpression(expr, Env),
@@ -75,7 +85,50 @@ public class AnalysisVisitor : CSharpSyntaxVisitor<AnalysisResult> {
     };
 
     protected virtual AnalysisResult HandleFix(MethodDeclarationSyntax decl, Environment Env) {
-        throw new NotImplementedException();
+        CSharpSyntaxNode body = decl.Body ?? (CSharpSyntaxNode?)decl.ExpressionBody?.Expression ?? throw new ArgumentException("Method declaration does not contain a body.");
+
+        if (!Delta.CodeToID.ContainsKey(decl))
+            throw new ArgumentException($"Analysing method declaration that was not assigned an Abstract Object ID. Node occurred at {decl.FullSpan}.");
+        AbstractObjID Of = Delta.CodeToID[decl];
+
+        AnalysisResult ret = HandleMethodClosureBody(body, decl.GetArgumentNames(), Of, Env.Push(ImmutableDictionary<VarName,ObjectInference>.Empty.Add(decl.Identifier.ValueText, ObjectInference.Create([Of]))));
+
+        return ret with { EndEnv = ret.EndEnv.Pop() };
+    }
+
+    // TODO: How to handle recursive constructors? Names are hard.
+    // protected virtual AnalysisResult HandleFix(AnalysisUnit unit) {
+    //     Environment Env = MakeInitialEnvironment().Push(unit.Defns.Select(decl => new KeyValuePair<VarName, ObjectInference>(decl.)));
+
+    // }
+
+    protected virtual AnalysisResult HandleMethodClosureBody(CSharpSyntaxNode body, IEnumerable<VarName> ArgNames, AbstractObjID MethodID, Environment Env, bool doCaptures = true) {
+        IEnumerable<VarName> Vc = body.GetFreeVariables(semantics);
+        ObjectInference Xr = ObjectInference.Create();
+        Dictionary<VarName, ObjectInference> StackEnv = ArgNames
+            .Select(n => new KeyValuePair<VarName, ObjectInference>(n, ObjectInference.Create())).ToDictionary(); //Arguments
+
+        if (doCaptures) {
+            foreach (VarName capture in Vc) {
+                StackEnv.Add(capture, Env[capture]); //TODO: Handle implicit 'this' field lookups.
+            }
+        }
+
+        Environment In = Env with { StackMap = new StackEnv([StackEnv.ToImmutableDictionary()]) };
+        AnalysisResult res = HandleNode(body, In);
+
+        // if (!Delta.CodeToID.ContainsKey(expr))
+        //     throw new ArgumentException($"Analysing closure that was not assigned an Abstract Object ID. Node occurred at {expr.FullSpan}.");
+        // AbstractObjID Of = Delta.CodeToID[expr];
+
+        TypeInference TOf = Env[MethodID];
+
+        return new AnalysisResult(
+            [
+                MethodID <= Xr,
+                new Arrow([.. ArgNames], In, res.EndEnv, res.Return) <= TOf,
+                .. res.Constraints
+            ], Xr, In);
     }
 
     //Handles: Type x, y = e1, e2;
@@ -300,28 +353,11 @@ public class AnalysisVisitor : CSharpSyntaxVisitor<AnalysisResult> {
     }
 
     protected virtual AnalysisResult HandleClosure(LambdaExpressionSyntax expr, Environment Env) {
-        IEnumerable<VarName> Vc = expr.Body.GetFreeVariables(semantics);
-        ObjectInference Xr = ObjectInference.Create();
-        Dictionary<VarName, ObjectInference> StackEnv = expr.GetArgumentNames()
-            .Select(n => new KeyValuePair<VarName, ObjectInference>(n, ObjectInference.Create())).ToDictionary(); //Arguments
-        foreach (VarName capture in Vc) {
-            StackEnv.Add(capture, Env[capture]);
-        }
-        Environment In = Env with { StackMap = new StackEnv([StackEnv.ToImmutableDictionary()]) };
-        AnalysisResult res = HandleNode(expr.Body, In);
-
         if (!Delta.CodeToID.ContainsKey(expr))
             throw new ArgumentException($"Analysing closure that was not assigned an Abstract Object ID. Node occurred at {expr.FullSpan}.");
         AbstractObjID Of = Delta.CodeToID[expr];
 
-        TypeInference TOf = Env[Of];
-
-        return new AnalysisResult(
-            [
-                Of <= Xr,
-                new Arrow([.. expr.GetArgumentNames()], In, res.EndEnv, res.Return) <= TOf,
-                .. res.Constraints
-            ], Xr, In);
+        return HandleMethodClosureBody(expr.Body, expr.GetArgumentNames(), Of, Env);
     }
 
 
@@ -400,7 +436,72 @@ public class AnalysisVisitor : CSharpSyntaxVisitor<AnalysisResult> {
     }
 
     protected virtual AnalysisResult HandleMatch(SwitchStatementSyntax stmt, Environment Env) {
-        throw new NotImplementedException();
+        if (!stmt.Sections.All(c => c.Labels.All(p => p is CasePatternSwitchLabelSyntax pat && IsPatternValid(pat))))
+            throw new ArgumentException($"Switch statement contains a case label that is not supported: {stmt}");
+
+        var data = stmt.Sections.SelectMany(s => s.Labels.Select(l => (GetPatternData(l), s.Statements)));
+        TypeInference branchBound = TypeInference.Create([..data.Select(kkv => kkv.Item1.Item1)]);
+
+
+        AnalysisResult expr = HandleExpression(stmt.Expression, Env);
+        ObjectInference.Var exprOut = ObjectInference.Create();
+        TypeInference.Var exprType = TypeInference.Create();
+
+        Environment branchOut = expr.EndEnv.GetFresh();
+        HashSet<InferenceConstraint> cons = [
+            .. expr.Constraints,
+            exprOut <= expr.Return, expr.Return <= exprOut,
+            new InferenceConstraint.TypeLookup(exprType, expr.EndEnv, exprOut),
+            exprType <= branchBound
+        ];
+        ObjectInference.Var ret = ObjectInference.Create();
+
+        foreach (var d in data) {
+            ObjectInference.Var resOut = ObjectInference.Create();
+
+            InferenceConstraint restrict = new InferenceConstraint.Restriction(resOut, expr.EndEnv, exprOut, d.Item1.Item1);
+            Environment branchIn = expr.EndEnv.Push(ImmutableDictionary<VarName, ObjectInference>.Empty.Add(d.Item1.Item2, resOut));
+
+            AnalysisResult res = HandleSequence(d.Statements, branchIn);
+            cons.Add(restrict);
+            cons.Add(new InferenceConstraint.Conditional(
+                [new InferenceConstraint.SubTyping(TypeInference.Create([d.Item1.Item1]), exprType)],
+                [],
+                [.. res.Constraints, .. res.EndEnv.Pop() <= branchOut, res.Return <= ret])
+            );
+        }
+
+        return new AnalysisResult([..cons], ret, branchOut);
+    }
+
+    protected virtual bool IsPatternValid(CasePatternSwitchLabelSyntax lbl) {
+        if (lbl is CasePatternSwitchLabelSyntax c) {
+            if (c.Pattern is DeclarationPatternSyntax decl) {
+                return decl.Type is IdentifierNameSyntax && decl.Designation is SingleVariableDesignationSyntax;
+            }
+        }
+        return false;
+    }
+    protected virtual bool IsPatternValid(SwitchExpressionArmSyntax arm) {
+        if (arm.Pattern is DeclarationPatternSyntax decl) {
+            return decl.Type is IdentifierNameSyntax && decl.Designation is SingleVariableDesignationSyntax;
+        }
+        return false;
+    }
+    protected virtual (Class, VarName) GetPatternData(SwitchLabelSyntax lbl) {
+        DeclarationPatternSyntax pat = (lbl as CasePatternSwitchLabelSyntax)?.Pattern as DeclarationPatternSyntax
+            ?? throw new ArgumentException($"Pattern does not match expected form: {lbl}");
+        return GetPatternData(pat);
+    }
+    protected virtual (Class, VarName) GetPatternData(SwitchExpressionArmSyntax arm) {
+        DeclarationPatternSyntax pat = arm.Pattern as DeclarationPatternSyntax
+            ?? throw new ArgumentException($"Pattern does not match expected form: {arm}");
+        return GetPatternData(pat);
+    }
+    protected virtual (Class, VarName) GetPatternData(DeclarationPatternSyntax pat) {
+        string type = (pat.Type as IdentifierNameSyntax)?.Identifier.ValueText ?? throw new ArgumentException($"Pattern does not match expected form: {pat}");
+        string name = (pat.Designation as SingleVariableDesignationSyntax)?.Identifier.ValueText ?? throw new ArgumentException($"Pattern does not match expected form: {pat}");
+        return (new Class(type), name);
     }
 
     protected virtual AnalysisResult HandleBlock(BlockSyntax stmt, Environment Env) {
