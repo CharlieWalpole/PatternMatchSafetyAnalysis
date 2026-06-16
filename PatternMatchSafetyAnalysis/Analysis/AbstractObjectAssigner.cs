@@ -78,6 +78,11 @@ public class AbstractObjectIDAssigner(SemanticModel semanticModel) : CSharpSynta
     protected AbstractObjID nextID = 0;
 
 
+    public virtual bool IsClassSubtype(ClassName l, ClassName r) {
+        throw new NotImplementedException();
+    }
+
+
     public override void VisitSimpleLambdaExpression(SimpleLambdaExpressionSyntax node) {
         AbstractObjID currentID = nextID;
         nextID++;

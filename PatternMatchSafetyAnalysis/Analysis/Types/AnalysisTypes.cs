@@ -4,9 +4,79 @@ using System.Collections.Immutable;
 namespace Analysis.Types;
 
 
-public interface Type {}
+public interface Type {
+    public static bool IsSubtype(Type l, Type r, AbstractObjectIDAssigner Delta) => (l, r) switch {
+        (Void, _) => true,
+        (_, Ok) => true,
+        (Class cl, Class cr) => Delta.IsClassSubtype(cl.Name, cr.Name),
+        (Arrow al, Arrow ar) => IsArrowSubtype(al, ar, Delta),
+        _ => false
+    };
+    private static bool IsArrowSubtype(Arrow l, Arrow r, AbstractObjectIDAssigner Delta) {
+        if (!l.IsOnlyLiteral() || !r.IsOnlyLiteral())
+            return false;
+        foreach (var o in ((ObjectInference.Literal)l.Return).Objects) {
+            if (!((ObjectInference.Literal)r.Return).Objects.Contains(o))
+                return false;
+        }
+        if ((l.Pre <= r.Pre).Any(c => c.IsTrivialUnsat(Delta)))
+            return false;
+        if ((l.Post <= r.Post).Any(c => c.IsTrivialUnsat(Delta)))
+            return false;
+        return true;
+    }
+}
 public record struct Class(ClassName Name) : Type;
-public record class Arrow(VarName[] Args, Environment Pre, Environment Post, ObjectSet Return) : Type;
+public record class Arrow(VarName[] Args, Environment Pre, Environment Post, ObjectSet Return) : Type {
+    public bool IsOnlyLiteral() {
+        if (Return is ObjectInference.Var)
+            return false;
+
+        foreach (var frame in Pre.StackMap.Mappings) {
+            foreach (var val in frame.Values) {
+                if (val is ObjectInference.Var)
+                    return false;
+            }
+        }
+        foreach (var frame in Post.StackMap.Mappings) {
+            foreach (var val in frame.Values) {
+                if (val is ObjectInference.Var)
+                    return false;
+            }
+        }
+
+        foreach (var val in Pre.HeapMap.Mapping.Values) {
+            if (val is ObjectInference.Var)
+                return false;
+        }
+        foreach (var val in Post.HeapMap.Mapping.Values) {
+            if (val is ObjectInference.Var)
+                return false;
+        }
+
+        foreach (var val in Pre.AliasMap.Mapping.Values) {
+            if (val is AliasInference.Var)
+                return false;
+        }
+        foreach (var val in Post.AliasMap.Mapping.Values) {
+            if (val is AliasInference.Var)
+                return false;
+        }
+
+        foreach (var val in Pre.TypeMap.ClosureMapping.Values) {
+            if (val is TypeInference.Var)
+                return false;
+        }
+        foreach (var val in Post.TypeMap.ClosureMapping.Values) {
+            if (val is TypeInference.Var)
+                return false;
+        }
+
+        return true;
+    }
+}
+public record struct Void : Type;
+public record struct Ok : Type;
 
 
 public record struct AliasData(AliasFlag Flag);
@@ -68,6 +138,7 @@ public interface AliasInference : InferenceVariable {
 public interface InferenceConstraint {
     InferenceConstraint Substitute(IDictionary<InferenceVariable, InferenceVariable> mapping);
     IEnumerable<InferenceConstraint> Normalise();
+    bool IsTrivialUnsat(AbstractObjectIDAssigner Delta);
 
     public interface PartialOrder<T, L> : InferenceConstraint where T : PartialOrder<T, L> where L : InferenceVariable {
         L l { get; init; }
@@ -80,7 +151,17 @@ public interface InferenceConstraint {
         public static ObjectInclusion Transitivity(ObjectInclusion l, ObjectInclusion r) =>
             new ObjectInclusion(l.l, r.r);
 
-        public IEnumerable<InferenceConstraint> Normalise() => [this];
+        public bool IsTrivialUnsat(AbstractObjectIDAssigner Delta) {
+            if (l is ObjectInference.Literal ll && r is ObjectInference.Literal rr) {
+                foreach (var o in ll.Objects) {
+                    if (!rr.Objects.Contains(o))
+                        return true;
+                }
+            }
+            return false;
+        }
+
+		public IEnumerable<InferenceConstraint> Normalise() => [this];
 
         public InferenceConstraint Substitute(IDictionary<InferenceVariable, InferenceVariable> mapping) =>
         new ObjectInclusion((ObjectInference)mapping.GetOrDefault(l, l), (ObjectInference)mapping.GetOrDefault(r, r));
@@ -88,6 +169,10 @@ public interface InferenceConstraint {
     public record class AliasBounding(AliasInference l, AliasInference r) : PartialOrder<AliasBounding, AliasInference> {
         public static AliasBounding Transitivity(AliasBounding l, AliasBounding r) =>
             new AliasBounding(l.l, r.r);
+
+        public bool IsTrivialUnsat(AbstractObjectIDAssigner Delta) =>
+            l is AliasInference.Literal ll && r is AliasInference.Literal rr && ll.Flag.Flag.Equals(AliasFlag.M) && rr.Flag.Flag.Equals(AliasFlag.S);
+        
 
         public IEnumerable<InferenceConstraint> Normalise() => [this];
 
@@ -98,12 +183,32 @@ public interface InferenceConstraint {
         public static SubTyping Transitivity(SubTyping l, SubTyping r) =>
             new SubTyping(l.l, r.r);
 
+        public bool IsTrivialUnsat(AbstractObjectIDAssigner Delta) {
+            if (l is TypeInference.Literal ll && r is TypeInference.Literal rr) {
+                foreach (var tl in ll.Types) {
+                    bool foundRHS = false;
+                    foreach (var tr in rr.Types) {
+                        if (Type.IsSubtype(tl, tr, Delta))
+                            foundRHS = true;
+                        if (foundRHS)
+                            break;
+                    }
+                    if (!foundRHS)
+                        return false; //If t in LHS s.t. all r in RHS s.t. l </= r then not subtypes
+                }
+                return true; //If all t in LHS have some r in RHS s.t. l <= r then subtypes
+            }
+            return false; //If not literals then not (trivial) subtypes
+        }
+
         public IEnumerable<InferenceConstraint> Normalise() => [this];
 
         public InferenceConstraint Substitute(IDictionary<InferenceVariable, InferenceVariable> mapping) =>
         new SubTyping((TypeInference)mapping.GetOrDefault(l, l), (TypeInference)mapping.GetOrDefault(l, l));
     }
     public record class HeapLookup(ObjectInference.Var Out, Environment Env, ObjectInference.Var Obj, FieldName Name) : InferenceConstraint {
+        public bool IsTrivialUnsat(AbstractObjectIDAssigner Delta) => false;
+
         public IEnumerable<InferenceConstraint> Normalise() => [this];
 
         public InferenceConstraint Substitute(IDictionary<InferenceVariable, InferenceVariable> mapping) =>
@@ -111,6 +216,8 @@ public interface InferenceConstraint {
     }
 
     public record class HeapUpdate(Environment Out, Environment In, ObjectInference.Var ObjIn, FieldName Name, ObjectInference ObjTo) : InferenceConstraint {
+        public bool IsTrivialUnsat(AbstractObjectIDAssigner Delta) => false;
+
         public IEnumerable<InferenceConstraint> Normalise() => [this];
 
         public InferenceConstraint Substitute(IDictionary<InferenceVariable, InferenceVariable> mapping) =>
@@ -118,6 +225,8 @@ public interface InferenceConstraint {
     }
 
     public record class TypeLookup(TypeInference.Var TypeOut, Environment Env, ObjectInference.Var Objs) : InferenceConstraint {
+        public bool IsTrivialUnsat(AbstractObjectIDAssigner Delta) => false;
+
         public IEnumerable<InferenceConstraint> Normalise() => [this];
 
         public InferenceConstraint Substitute(IDictionary<InferenceVariable, InferenceVariable> mapping) =>
@@ -125,6 +234,8 @@ public interface InferenceConstraint {
     }
 
     public record class Restriction(ObjectInference.Var Out, Environment Env, ObjectInference.Var In, Type Tau) : InferenceConstraint {
+        public bool IsTrivialUnsat(AbstractObjectIDAssigner Delta) => false;
+
         public IEnumerable<InferenceConstraint> Normalise() => [this];
 
         public InferenceConstraint Substitute(IDictionary<InferenceVariable, InferenceVariable> mapping) =>
@@ -136,6 +247,8 @@ public interface InferenceConstraint {
         TypeInference.Var TypeInternal, Environment EnvInternal,
         Environment EnvIn, ObjectInference.Var Funcs, ImmutableArray<ObjectInference.Var> Arguments
     ) : InferenceConstraint {
+        public bool IsTrivialUnsat(AbstractObjectIDAssigner Delta) => false;
+
         public IEnumerable<InferenceConstraint> Normalise() => [this];
 
         public InferenceConstraint Substitute(IDictionary<InferenceVariable, InferenceVariable> mapping) =>
@@ -146,7 +259,7 @@ public interface InferenceConstraint {
         );
     }
 
-    public record class Conditional(ImmutableList<SubTyping> GuardType, ImmutableList<AliasBounding> GuardAlias, ImmutableList<InferenceConstraint> Body) : InferenceConstraint {
+    public record class Conditional(ImmutableHashSet<SubTyping> GuardType, ImmutableHashSet<AliasBounding> GuardAlias, ImmutableHashSet<InferenceConstraint> Body) : InferenceConstraint {
         public InferenceConstraint Substitute(IDictionary<InferenceVariable, InferenceVariable> mapping) =>
             new Conditional([.. GuardType.Select(c => (SubTyping)c.Substitute(mapping))],
                 [.. GuardAlias.Select(c => (AliasBounding)c.Substitute(mapping))],
@@ -159,12 +272,14 @@ public interface InferenceConstraint {
             List<Conditional> others = [];
             foreach (InferenceConstraint constraint in Body.SelectMany(c => c.Normalise())) {
                 if (constraint is Conditional c)
-                    others.Add(new Conditional(GuardType.AddRange(c.GuardType), GuardAlias.AddRange(c.GuardAlias), c.Body));
+                    others.Add(new Conditional([.. GuardType.Append(c.GuardType)], [.. GuardAlias.Append(c.GuardAlias)], c.Body));
                 else
                     norms.Add(constraint);
             }
             return [new Conditional(GuardType, GuardAlias, [.. norms]), .. others];
         }
+
+        public bool IsTrivialUnsat(AbstractObjectIDAssigner Delta) => false;
     }
 
 }
