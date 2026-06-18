@@ -247,6 +247,62 @@ public class ConstraintSolver {
         || Restrict()
         || ApplicationResolution();
 
+    protected InferenceVariableSolution ReadSolutionFromConstraints() {
+        IEnumerable<InferenceConstraint.ObjectInclusion> objIncl = GetConstraints<InferenceConstraint.ObjectInclusion>().Where(c => c.l is ObjectInference.Literal && c.r is ObjectInference.Var);
+        IEnumerable<InferenceConstraint.SubTyping> subTy = GetConstraints<InferenceConstraint.SubTyping>().Where(c => c.l is TypeInference.Literal && c.r is TypeInference.Var);
+        IEnumerable<InferenceConstraint.AliasBounding> als = GetConstraints<InferenceConstraint.AliasBounding>().Where(c => c.l is AliasInference.Literal && c.r is AliasInference.Var);
+
+        Dictionary<ObjectInference.Var, HashSet<AbstractObjID>> ObjSol = new Dictionary<ObjectInference.Var, HashSet<int>>();
+        Dictionary<TypeInference.Var, HashSet<Types.Type>> TypeSol = new Dictionary<TypeInference.Var, HashSet<Types.Type>>();
+        Dictionary<AliasInference.Var, AliasFlag> AliasSol = new Dictionary<AliasInference.Var, AliasFlag>();
+
+        foreach (var c in objIncl) {
+            ObjectInference.Var k = (ObjectInference.Var)c.r;
+            ObjectInference.Literal v = (ObjectInference.Literal)c.l;
+
+            if (!ObjSol.ContainsKey(k))
+                ObjSol.Add(k, new HashSet<int>());
+
+            foreach (var o in v.Objects) {
+                ObjSol[k].Add(o);
+            }
+        }
+
+        foreach (var c in subTy) {
+            TypeInference.Var k = (TypeInference.Var)c.r;
+            TypeInference.Literal v = (TypeInference.Literal)c.l;
+
+            if (!TypeSol.ContainsKey(k))
+                TypeSol.Add(k, new HashSet<Types.Type>());
+
+            foreach (var o in v.Types) {
+                TypeSol[k].Add(o);
+            }
+        }
+
+        foreach (var c in als) {
+            AliasInference.Var k = (AliasInference.Var)c.r;
+            AliasInference.Literal v = (AliasInference.Literal)c.l;
+
+            AliasSol.Add(k, v.Flag.Flag);
+        }
+
+        return new InferenceVariableSolution(
+            ObjSol.Select(kv => new KeyValuePair<ObjectInference.Var, ImmutableHashSet<int>>(kv.Key, [.. kv.Value])).ToImmutableDictionary(),
+            TypeSol.Select(kv => new KeyValuePair<TypeInference.Var, ImmutableHashSet<Types.Type>>(kv.Key, [.. kv.Value])).ToImmutableDictionary(),
+            [.. AliasSol]
+        );
+    }
+
+    protected bool IsTypeSafe() {
+        InferenceVariableSolution Sol = ReadSolutionFromConstraints();
+
+        IEnumerable<InferenceConstraint> cons = GetConstraints<InferenceConstraint.ObjectInclusion>().Select(c => c.ApplySolution(Sol))
+            .Append(GetConstraints<InferenceConstraint.SubTyping>().Select(c => c.ApplySolution(Sol)))
+            .Append(GetConstraints<InferenceConstraint.AliasBounding>().Select(c => c.ApplySolution(Sol)));
+
+        return cons.Any(c => c.IsTrivialUnsat(Delta));
+    }
 
 
 }

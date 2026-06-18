@@ -90,6 +90,11 @@ public record class StackEnv(ImmutableArray<ImmutableDictionary<VarName, ObjectS
         new([..Mappings.Select<ImmutableDictionary<VarName, ObjectSet>, ImmutableDictionary<VarName, ObjectSet>>(Mapping =>
             [..Mapping.Select(kv => new KeyValuePair<VarName, ObjectSet>(kv.Key, (ObjectSet)mapping.GetOrDefault(kv.Value, kv.Value)))]
         )]);
+
+    public StackEnv ApplySolution(InferenceVariableSolution Sol) =>
+        new([..Mappings.Select<ImmutableDictionary<VarName, ObjectSet>, ImmutableDictionary<VarName, ObjectSet>>(Mapping =>
+            [..Mapping.Select(kv => new KeyValuePair<VarName, ObjectSet>(kv.Key, kv.Value.ApplySolution(Sol)))]
+        )]);
 }
 
 public record class HeapEnv(ImmutableDictionary<(AbstractObjID, FieldName), ObjectSet> Mapping) {
@@ -133,7 +138,10 @@ public record class HeapEnv(ImmutableDictionary<(AbstractObjID, FieldName), Obje
     public HeapEnv Compose(HeapEnv r) => r;
 
     public HeapEnv Substitute(IDictionary<InferenceVariable, InferenceVariable> mapping) =>
-        new([..Mapping.Select(kv => new KeyValuePair<(AbstractObjID, FieldName), ObjectSet>(kv.Key, (ObjectSet)mapping.GetOrDefault(kv.Value, kv.Value)))]);
+        new([.. Mapping.Select(kv => new KeyValuePair<(AbstractObjID, FieldName), ObjectSet>(kv.Key, (ObjectSet)mapping.GetOrDefault(kv.Value, kv.Value)))]);
+
+    public HeapEnv ApplySolution(InferenceVariableSolution Sol) =>
+        new([.. Mapping.Select(kv => new KeyValuePair<(AbstractObjID, FieldName), ObjectSet>(kv.Key, kv.Value.ApplySolution(Sol)))]);
 }
 
 public record class TypeEnv(ImmutableDictionary<AbstractObjID, Class> ClassMapping, ImmutableDictionary<AbstractObjID, TypeInference> ClosureMapping) {
@@ -194,9 +202,12 @@ public record class TypeEnv(ImmutableDictionary<AbstractObjID, Class> ClassMappi
     /// </summary>
     public static IEnumerable<InferenceConstraint> operator >=(TypeEnv l, TypeEnv r)
         => r.ClosureMapping.Select(kv => new InferenceConstraint.SubTyping(kv.Value, l.ClosureMapping[kv.Key]));
-    
+
     public TypeEnv Substitute(IDictionary<InferenceVariable, InferenceVariable> mapping) =>
-        new(ClassMapping, [..ClosureMapping.Select(kv => new KeyValuePair<AbstractObjID, TypeInference>(kv.Key, (TypeInference)mapping.GetOrDefault(kv.Value, kv.Value)))]);
+        new(ClassMapping, [.. ClosureMapping.Select(kv => new KeyValuePair<AbstractObjID, TypeInference>(kv.Key, (TypeInference)mapping.GetOrDefault(kv.Value, kv.Value)))]);
+
+    public TypeEnv ApplySolution(InferenceVariableSolution Sol) =>
+        new(ClassMapping, [.. ClosureMapping.Select(kv => new KeyValuePair<AbstractObjID, TypeInference>(kv.Key, kv.Value.ApplySolution(Sol)))]);
 }
 
 public record class AliasEnv(ImmutableDictionary<AbstractObjID, AliasInference> Mapping) {
@@ -238,7 +249,10 @@ public record class AliasEnv(ImmutableDictionary<AbstractObjID, AliasInference> 
     }
 
     public AliasEnv Substitute(IDictionary<InferenceVariable, InferenceVariable> mapping) =>
-        new([..Mapping.Select(kv => new KeyValuePair<AbstractObjID, AliasInference>(kv.Key, (AliasInference)mapping.GetOrDefault(kv.Value, kv.Value)))]);
+        new([.. Mapping.Select(kv => new KeyValuePair<AbstractObjID, AliasInference>(kv.Key, (AliasInference)mapping.GetOrDefault(kv.Value, kv.Value)))]);
+
+    public AliasEnv ApplySolution(InferenceVariableSolution Sol) =>
+        new([.. Mapping.Select(kv => new KeyValuePair<AbstractObjID, AliasInference>(kv.Key, kv.Value.ApplySolution(Sol)))]);
 }
 
 public record class Environment(StackEnv StackMap, HeapEnv HeapMap, TypeEnv TypeMap, AliasEnv AliasMap) {
@@ -260,7 +274,7 @@ public record class Environment(StackEnv StackMap, HeapEnv HeapMap, TypeEnv Type
     /// Assumes that the domains of the given environments are equal.
     /// </summary>
     public static IEnumerable<InferenceConstraint> operator <=(Environment l, Environment r)
-        => [.. l.StackMap <= r.StackMap, .. l.HeapMap <= r.HeapMap, ..l.TypeMap <= r.TypeMap, .. l.AliasMap <= r.AliasMap];
+        => [.. l.StackMap <= r.StackMap, .. l.HeapMap <= r.HeapMap, .. l.TypeMap <= r.TypeMap, .. l.AliasMap <= r.AliasMap];
     /// <summary>
     /// Assumes that the domains of the given environments are equal.
     /// </summary>
@@ -287,4 +301,6 @@ public record class Environment(StackEnv StackMap, HeapEnv HeapMap, TypeEnv Type
     public Environment Substitute(IDictionary<InferenceVariable, InferenceVariable> mapping) =>
         new Environment(StackMap.Substitute(mapping), HeapMap.Substitute(mapping), TypeMap.Substitute(mapping), AliasMap.Substitute(mapping));
 
+    public Environment ApplySolution(InferenceVariableSolution Sol) =>
+        new Environment(StackMap.ApplySolution(Sol), HeapMap.ApplySolution(Sol), TypeMap.ApplySolution(Sol), AliasMap.ApplySolution(Sol));
 }

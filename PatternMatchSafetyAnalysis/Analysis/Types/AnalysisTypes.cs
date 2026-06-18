@@ -1,5 +1,6 @@
 global using ClassName = string;
 using System.Collections.Immutable;
+using System.Runtime.CompilerServices;
 
 namespace Analysis.Types;
 
@@ -82,10 +83,26 @@ public record struct Ok : Type;
 public record struct AliasData(AliasFlag Flag);
 public enum AliasFlag { S, M }
 
-public interface InferenceVariable {}
+public interface InferenceVariable {
+    InferenceVariable ApplySolution(InferenceVariableSolution Sol);
+}
 public interface ObjectInference : InferenceVariable {
-    public record class Literal(ImmutableHashSet<AbstractObjID> Objects) : ObjectInference;
-    public record class Var(int ID) : ObjectInference;
+    public record class Literal(ImmutableHashSet<AbstractObjID> Objects) : ObjectInference {
+        public Literal ApplySolution(InferenceVariableSolution Sol) => this;
+
+        InferenceVariable InferenceVariable.ApplySolution(InferenceVariableSolution Sol) {
+            return ApplySolution(Sol);
+        }
+    }
+
+    public record class Var(int ID) : ObjectInference {
+        public Literal ApplySolution(InferenceVariableSolution Sol) =>
+            new Literal(Sol.ObjSol[this]);
+
+        InferenceVariable InferenceVariable.ApplySolution(InferenceVariableSolution Sol) {
+            return ApplySolution(Sol);
+        }
+    }
 
     public static Literal Create(params AbstractObjID[] Objs) => new Literal([.. Objs]);
     public static Literal Create(IEnumerable<AbstractObjID> Objs) => new Literal([.. Objs]);
@@ -101,15 +118,31 @@ public interface ObjectInference : InferenceVariable {
 
     static InferenceConstraint.ObjectInclusion operator <=(AbstractObjID l, ObjectInference r) => new InferenceConstraint.ObjectInclusion(new Literal([l]), r);
     static InferenceConstraint.ObjectInclusion operator >=(AbstractObjID l, ObjectInference r) => new InferenceConstraint.ObjectInclusion(r, new Literal([l]));
+
+    new Literal ApplySolution(InferenceVariableSolution Sol);
 }
 public interface TypeInference : InferenceVariable {
-    public record class Literal(ImmutableHashSet<Type> Types) : TypeInference;
-    public record class Var(int ID) : TypeInference;
+    public record class Literal(ImmutableHashSet<Type> Types) : TypeInference {
+        public Literal ApplySolution(InferenceVariableSolution Sol) => this;
+
+        InferenceVariable InferenceVariable.ApplySolution(InferenceVariableSolution Sol) {
+            return ApplySolution(Sol);
+        }
+    }
+
+    public record class Var(int ID) : TypeInference {
+        public Literal ApplySolution(InferenceVariableSolution Sol) =>
+            new Literal(Sol.TypeSol[this]);
+
+        InferenceVariable InferenceVariable.ApplySolution(InferenceVariableSolution Sol) {
+            return ApplySolution(Sol);
+        }
+    }
 
     public static TypeInference Create(params Type[] Types) => new Literal([.. Types]);
     public static TypeInference Create(IEnumerable<Type> Types) => new Literal([.. Types]);
     private static int currentID = 0;
-    public static TypeInference.Var Create() => new Var(++currentID);
+    public static Var Create() => new Var(++currentID);
 
     static InferenceConstraint operator <=(TypeInference l, TypeInference r) => new InferenceConstraint.SubTyping(l, r);
     static InferenceConstraint operator >=(TypeInference l, TypeInference r) => new InferenceConstraint.SubTyping(r, l);
@@ -119,10 +152,26 @@ public interface TypeInference : InferenceVariable {
 
     static InferenceConstraint.SubTyping operator <=(Type l, TypeInference r) => new InferenceConstraint.SubTyping(new Literal([l]), r);
     static InferenceConstraint.SubTyping operator >=(Type l, TypeInference r) => new InferenceConstraint.SubTyping(r, new Literal([l]));
+
+    new Literal ApplySolution(InferenceVariableSolution Sol);
 }
 public interface AliasInference : InferenceVariable {
-    public record class Literal(Alias Flag) : AliasInference;
-    public record class Var(int ID) : AliasInference;
+    public record class Literal(Alias Flag) : AliasInference {
+        public Literal ApplySolution(InferenceVariableSolution Sol) => this;
+
+        InferenceVariable InferenceVariable.ApplySolution(InferenceVariableSolution Sol) {
+            return ApplySolution(Sol);
+        }
+    }
+
+    public record class Var(int ID) : AliasInference {
+        public Literal ApplySolution(InferenceVariableSolution Sol) =>
+            new Literal(new AliasData(Sol.AliasSol[this]));
+
+        InferenceVariable InferenceVariable.ApplySolution(InferenceVariableSolution Sol) {
+            return ApplySolution(Sol);
+        }
+    }
 
     public static AliasInference Create(Alias Flag) => new Literal(Flag);
     private static int currentID = 0;
@@ -132,6 +181,8 @@ public interface AliasInference : InferenceVariable {
 
     static InferenceConstraint operator <=(AliasInference l, AliasInference r) => new InferenceConstraint.AliasBounding(l, r);
     static InferenceConstraint operator >=(AliasInference l, AliasInference r) => new InferenceConstraint.AliasBounding(r, l);
+
+    new Literal ApplySolution(InferenceVariableSolution Sol);
 }
 
 
@@ -145,11 +196,15 @@ public interface InferenceConstraint {
         L r { get; init; }
         static abstract T Transitivity(T l, T r);
         static virtual bool isTransitive(T l, T r) => l.r.Equals(r.l);
+        InferenceConstraint ApplySolution(InferenceVariableSolution Sol);
     }
 
     public record class ObjectInclusion(ObjectInference l, ObjectInference r) : PartialOrder<ObjectInclusion, ObjectInference> {
         public static ObjectInclusion Transitivity(ObjectInclusion l, ObjectInclusion r) =>
             new ObjectInclusion(l.l, r.r);
+
+        public InferenceConstraint ApplySolution(InferenceVariableSolution Sol) =>
+            new ObjectInclusion(l.ApplySolution(Sol), r.ApplySolution(Sol));
 
         public bool IsTrivialUnsat(AbstractObjectIDAssigner Delta) {
             if (l is ObjectInference.Literal ll && r is ObjectInference.Literal rr) {
@@ -161,7 +216,7 @@ public interface InferenceConstraint {
             return false;
         }
 
-		public IEnumerable<InferenceConstraint> Normalise() => [this];
+        public IEnumerable<InferenceConstraint> Normalise() => [this];
 
         public InferenceConstraint Substitute(IDictionary<InferenceVariable, InferenceVariable> mapping) =>
         new ObjectInclusion((ObjectInference)mapping.GetOrDefault(l, l), (ObjectInference)mapping.GetOrDefault(r, r));
@@ -170,9 +225,12 @@ public interface InferenceConstraint {
         public static AliasBounding Transitivity(AliasBounding l, AliasBounding r) =>
             new AliasBounding(l.l, r.r);
 
+        public InferenceConstraint ApplySolution(InferenceVariableSolution Sol) =>
+            new AliasBounding(l.ApplySolution(Sol), r.ApplySolution(Sol));
+
         public bool IsTrivialUnsat(AbstractObjectIDAssigner Delta) =>
-            l is AliasInference.Literal ll && r is AliasInference.Literal rr && ll.Flag.Flag.Equals(AliasFlag.M) && rr.Flag.Flag.Equals(AliasFlag.S);
-        
+        l is AliasInference.Literal ll && r is AliasInference.Literal rr && ll.Flag.Flag.Equals(AliasFlag.M) && rr.Flag.Flag.Equals(AliasFlag.S);
+
 
         public IEnumerable<InferenceConstraint> Normalise() => [this];
 
@@ -182,6 +240,9 @@ public interface InferenceConstraint {
     public record class SubTyping(TypeInference l, TypeInference r) : PartialOrder<SubTyping, TypeInference> {
         public static SubTyping Transitivity(SubTyping l, SubTyping r) =>
             new SubTyping(l.l, r.r);
+
+        public InferenceConstraint ApplySolution(InferenceVariableSolution Sol) =>
+            new SubTyping(l.ApplySolution(Sol), r.ApplySolution(Sol));
 
         public bool IsTrivialUnsat(AbstractObjectIDAssigner Delta) {
             if (l is TypeInference.Literal ll && r is TypeInference.Literal rr) {
@@ -207,6 +268,7 @@ public interface InferenceConstraint {
         new SubTyping((TypeInference)mapping.GetOrDefault(l, l), (TypeInference)mapping.GetOrDefault(l, l));
     }
     public record class HeapLookup(ObjectInference.Var Out, Environment Env, ObjectInference.Var Obj, FieldName Name) : InferenceConstraint {
+
         public bool IsTrivialUnsat(AbstractObjectIDAssigner Delta) => false;
 
         public IEnumerable<InferenceConstraint> Normalise() => [this];
@@ -291,3 +353,9 @@ public record class MethodSummary(
     ObjectInference.Var ThisVariable,
     ImmutableHashSet<InferenceConstraint> Constraints,
     TypeInference MethodType);
+
+public record class InferenceVariableSolution(
+    ImmutableDictionary<ObjectInference.Var, ImmutableHashSet<AbstractObjID>> ObjSol,
+    ImmutableDictionary<TypeInference.Var, ImmutableHashSet<Type>> TypeSol,
+    ImmutableDictionary<AliasInference.Var, AliasFlag> AliasSol
+);
