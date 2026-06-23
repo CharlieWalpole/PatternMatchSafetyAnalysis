@@ -6,3 +6,7 @@ PatternMatchSafetyRunner/obj/
 PatternMatchSafetyAnalysis/bin/
 
 PatternMatchSafetyAnalysis/obj/
+
+AnalysisTests/bin/
+
+AnalysisTests/obj/

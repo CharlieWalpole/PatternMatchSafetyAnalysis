@@ -93,6 +93,11 @@ public interface ObjectInference : InferenceVariable {
         InferenceVariable InferenceVariable.ApplySolution(InferenceVariableSolution Sol) {
             return ApplySolution(Sol);
         }
+
+        public virtual bool Equals(Literal? other) => other is not null &&
+            Objects.All(other.Objects.Contains) && other.Objects.All(Objects.Contains);
+
+        public override int GetHashCode() => Objects.Aggregate(0, HashCode.Combine);
     }
 
     public record class Var(int ID) : ObjectInference {

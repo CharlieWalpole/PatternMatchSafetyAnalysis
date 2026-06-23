@@ -294,15 +294,7 @@ public class ConstraintSolver {
         );
     }
 
-    protected bool IsTypeSafe() {
-        InferenceVariableSolution Sol = ReadSolutionFromConstraints();
-
-        IEnumerable<InferenceConstraint> cons = GetConstraints<InferenceConstraint.ObjectInclusion>().Select(c => c.ApplySolution(Sol))
-            .Append(GetConstraints<InferenceConstraint.SubTyping>().Select(c => c.ApplySolution(Sol)))
-            .Append(GetConstraints<InferenceConstraint.AliasBounding>().Select(c => c.ApplySolution(Sol)));
-
-        return cons.Any(c => c.IsTrivialUnsat(Delta));
-    }
+    protected bool IsTypeSafe() => Constraints.Any(c => c.IsTrivialUnsat(Delta));
 
 
 }
