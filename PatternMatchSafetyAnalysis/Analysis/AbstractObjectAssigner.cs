@@ -79,6 +79,8 @@ public class AbstractObjectIDAssigner(SemanticModel semanticModel) : CSharpSynta
 
 
     public virtual bool IsClassSubtype(ClassName l, ClassName r) {
+        if (l.Equals(r))
+            return true;
         throw new NotImplementedException();
     }
 
@@ -189,5 +191,20 @@ public class AbstractObjectIDAssigner(SemanticModel semanticModel) : CSharpSynta
             .SelectMany(sym => sym.DeclaringSyntaxReferences)
             .Select(r => r.GetSyntax())
             .Select(n => CodeToID[n]);
+    }
+
+    public virtual string GetMethodName(AbstractObjID m) {
+        if (!CodeToID.ContainsValue(m))
+            throw new ArgumentException("Cannot get the name of an abstract object ID that has not been assigned by the AbstractObjectAssigner.");
+        SyntaxNode node = CodeToID.First(kv => kv.Value.Equals(m)).Key;
+        if (node is MethodDeclarationSyntax decl) {
+            return decl.GetMethodName();
+        }
+        else if (node is ConstructorDeclarationSyntax cDecl) {
+            return cDecl.GetMethodName();
+        }
+        else {
+            throw new ArgumentException("Abstract object ID given was not a method or constructor declaration.");
+        }
     }
 }

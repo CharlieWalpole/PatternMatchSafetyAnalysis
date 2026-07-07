@@ -84,6 +84,35 @@ public class AnalysisVisitor : CSharpSyntaxVisitor<AnalysisResult> {
         _ => throw new NotImplementedException()
     };
 
+    protected virtual MethodSummary MakeMethodSummary(AnalysisResult result, ObjectInference.Var This, TypeInference MethodType) =>
+        new MethodSummary(
+            [.. result.GetInferenceVariables(), This],
+            This,
+            result.Constraints,
+            MethodType
+        );
+
+    public virtual ImmutableDictionary<AbstractObjID, MethodSummary> HandleAnalysisUnit(AnalysisUnit unit) => HandleAnalysisUnit(unit, MakeInitialEnvironment());
+
+    public virtual ImmutableDictionary<AbstractObjID, MethodSummary> HandleAnalysisUnit(AnalysisUnit unit, Environment Env) {
+        ImmutableDictionary<VarName, ObjectInference> newFrame = [..unit.Defns.Select(decl => new KeyValuePair<VarName, ObjectInference>(decl.GetName(), ObjectInference.Create([Delta.CodeToID[decl.DeclarationNode]])))];
+
+        Environment In = Env.Push(newFrame.Add("this", ObjectInference.Create()));
+
+        IEnumerable<(ObjectInference.Var, AbstractObjID, AnalysisResult)> results = unit.Defns
+                .Select(decl => (decl, ObjectInference.Create()))
+                .Select(p => (p.Item2, Delta.CodeToID[p.decl.DeclarationNode], HandleMethodClosureBody(p.decl.GetBody(), p.decl.GetArgumentNames(), Delta.CodeToID[p.decl.DeclarationNode], In with { StackMap = In.StackMap.SetVar("this", p.Item2) })))
+                .Select(res => (res.Item1, res.Item2, res.Item3 with { EndEnv = res.Item3.EndEnv.Pop() }));
+
+        foreach (var res in results) {
+            if (MethodSummaries.ContainsKey(res.Item2))
+                throw new Exception($"Method analysed twice. ID: {res.Item1}");
+            MethodSummaries.Add(res.Item2, MakeMethodSummary(res.Item3, res.Item1, Env.TypeMap[res.Item2]));
+        }
+
+        return [.. MethodSummaries];
+    }
+
     protected virtual AnalysisResult HandleFix(MethodDeclarationSyntax decl, Environment Env) {
         CSharpSyntaxNode body = decl.Body ?? (CSharpSyntaxNode?)decl.ExpressionBody?.Expression ?? throw new ArgumentException("Method declaration does not contain a body.");
 
@@ -91,16 +120,10 @@ public class AnalysisVisitor : CSharpSyntaxVisitor<AnalysisResult> {
             throw new ArgumentException($"Analysing method declaration that was not assigned an Abstract Object ID. Node occurred at {decl.FullSpan}.");
         AbstractObjID Of = Delta.CodeToID[decl];
 
-        AnalysisResult ret = HandleMethodClosureBody(body, decl.GetArgumentNames(), Of, Env.Push(ImmutableDictionary<VarName,ObjectInference>.Empty.Add(decl.Identifier.ValueText, ObjectInference.Create([Of]))));
+        AnalysisResult ret = HandleMethodClosureBody(body, decl.GetArgumentNames(), Of, Env.Push(ImmutableDictionary<VarName, ObjectInference>.Empty.Add(decl.Identifier.ValueText, ObjectInference.Create([Of]))));
 
         return ret with { EndEnv = ret.EndEnv.Pop() };
     }
-
-    // TODO: How to handle recursive constructors? Names are hard.
-    // protected virtual AnalysisResult HandleFix(AnalysisUnit unit) {
-    //     Environment Env = MakeInitialEnvironment().Push(unit.Defns.Select(decl => new KeyValuePair<VarName, ObjectInference>(decl.)));
-
-    // }
 
     protected virtual AnalysisResult HandleMethodClosureBody(CSharpSyntaxNode body, IEnumerable<VarName> ArgNames, AbstractObjID MethodID, Environment Env, bool doCaptures = true) {
         IEnumerable<VarName> Vc = body.GetFreeVariables(semantics);
@@ -110,8 +133,10 @@ public class AnalysisVisitor : CSharpSyntaxVisitor<AnalysisResult> {
 
         if (doCaptures) {
             foreach (VarName capture in Vc) {
-                StackEnv.Add(capture, Env[capture]); //TODO: Handle implicit 'this' field lookups.
+                StackEnv.Add(capture, Env[capture]);
             }
+            if (!StackEnv.ContainsKey("this"))
+                StackEnv.Add("this", Env["this"]);
         }
 
         Environment In = Env with { StackMap = new StackEnv([StackEnv.ToImmutableDictionary()]) };
@@ -229,27 +254,31 @@ public class AnalysisVisitor : CSharpSyntaxVisitor<AnalysisResult> {
     }
 
     protected virtual AnalysisResult HandleMethodLookup(AbstractObjID m, Environment Env, Optional<ObjectInference.Var> ThisVariable) {
-        MethodSummary sum = MethodSummaries[m];
-        //(ImmutableHashSet<InferenceVariable> vars, ImmutableHashSet<InferenceConstraint> cons, TypeInference t) = MethodSummaries[m];
-        ImmutableDictionary<InferenceVariable, InferenceVariable> freshMap = [
-            ..sum.InferenceVariables.Select(v => v is ObjectInference o ? new KeyValuePair<InferenceVariable, InferenceVariable>(o, ObjectInference.Create()) :
+        if (MethodSummaries.TryGetValue(m, out MethodSummary? sum)) { //Previously Analysed method/constructor.
+
+            ImmutableDictionary<InferenceVariable, InferenceVariable> freshMap = [
+          ..sum.InferenceVariables.Select(v => v is ObjectInference o ? new KeyValuePair<InferenceVariable, InferenceVariable>(o, ObjectInference.Create()) :
                         v is TypeInference t ? new KeyValuePair<InferenceVariable, InferenceVariable>(t, TypeInference.Create()) :
                         new KeyValuePair<InferenceVariable, InferenceVariable>(v, AliasInference.Create())
                 )
-        ];
-        if (ThisVariable.HasValue)
-            freshMap = freshMap.Remove(sum.ThisVariable).Add(sum.ThisVariable, ThisVariable.Value);
-        else
-            freshMap = freshMap.Remove(sum.ThisVariable).Add(sum.ThisVariable, Env["this"]);
+      ];
+            if (ThisVariable.HasValue)
+                freshMap = freshMap.Remove(sum.ThisVariable).Add(sum.ThisVariable, ThisVariable.Value);
+            else
+                freshMap = freshMap.Remove(sum.ThisVariable).Add(sum.ThisVariable, Env["this"]);
 
-        Environment Out = Env.GetFresh();
-        ImmutableHashSet<InferenceConstraint> RetCons = [
-            ..sum.Constraints.Select(c => c.Substitute(freshMap)),
+            Environment Out = Env.GetFresh();
+            ImmutableHashSet<InferenceConstraint> RetCons = [
+                ..sum.Constraints.Select(c => c.Substitute(freshMap)),
             ..Env <= Out,
             (TypeInference)freshMap[sum.MethodType] <= Out.TypeMap[m]
-        ];
+            ];
 
-        return new AnalysisResult(RetCons, new ObjectInference.Literal([m]), Out);
+            return new AnalysisResult(RetCons, new ObjectInference.Literal([m]), Out);
+        }
+        else { // (Co-)Recursive method/constructor
+            return new AnalysisResult([], Env.StackMap[Delta.GetMethodName(m)], Env);
+        }
     }
 
     protected virtual AnalysisResult HandleThisFieldLookup(FieldName name, Environment Env) {
@@ -267,6 +296,7 @@ public class AnalysisVisitor : CSharpSyntaxVisitor<AnalysisResult> {
         ], Y, Out);
     }
 
+    // Handled?: How to handle recursive constructors? Names are hard. (Should be in StackEnv as $"Constructor: {Defn.GetConstructorType()}"; Move to SyntaxHelpers?)
     protected virtual AnalysisResult HandleConstructor(ObjectCreationExpressionSyntax expr, Environment Env) {
         IEnumerable<AbstractObjID> defIDs = Delta.GetConstructorFromCreationExpression(expr);
         ObjectInference.Var Cstr = ObjectInference.Create();

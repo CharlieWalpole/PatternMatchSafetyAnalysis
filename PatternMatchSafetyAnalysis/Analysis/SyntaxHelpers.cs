@@ -7,6 +7,7 @@ namespace Analysis;
 
 public static class SyntaxHelper {
     public static string GetMethodName(this MethodDeclarationSyntax method) => method.Identifier.ValueText;
+    public static string GetMethodName(this ConstructorDeclarationSyntax cstr) => $"Constructor: {cstr.GetConstructorType()}";
     public static string GetConstructorType(this ConstructorDeclarationSyntax cstr) => cstr.Identifier.ValueText;
     public static string GetIdentifierName(this IdentifierNameSyntax var) => var.Identifier.ValueText;
     public static string GetFieldName(this FieldDeclarationSyntax f) => 
@@ -29,6 +30,9 @@ public static class SyntaxHelper {
     }
 
     public static IEnumerable<VarName> GetArgumentNames(this MethodDeclarationSyntax node) =>
+        node.ParameterList.Parameters.Select(p => p.Identifier.ValueText);
+
+    public static IEnumerable<VarName> GetArgumentNames(this ConstructorDeclarationSyntax node) =>
         node.ParameterList.Parameters.Select(p => p.Identifier.ValueText);
 
 

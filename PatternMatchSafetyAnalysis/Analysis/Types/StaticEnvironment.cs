@@ -8,12 +8,15 @@ global using Alias = Analysis.Types.AliasData;
 
 using Type = Analysis.Types.Type;
 using System.Collections.Immutable;
+using System.Text;
 
 namespace Analysis.Types;
 
 //using ObjectSet = HashSet<AbstractObjID>;
 
-public record class StackEnv(ImmutableArray<ImmutableDictionary<VarName, ObjectSet>> Mappings) { //TODO: Should be a stack of maps
+public record class StackEnv(ImmutableArray<ImmutableDictionary<VarName, ObjectSet>> Mappings) {
+
+    public IEnumerable<InferenceVariable> GetInferenceVariables() => Mappings.SelectMany(frame => frame.Values).Where(v => v is ObjectInference.Var);
 
     public bool ContainsKey(VarName name) {
         foreach (var item in Mappings) {
@@ -21,6 +24,27 @@ public record class StackEnv(ImmutableArray<ImmutableDictionary<VarName, ObjectS
                 return true;
         }
         return false;
+    }
+
+    public override string ToString() {
+        StringBuilder sb = new StringBuilder();
+
+        sb.Append('[');
+        for (int i = 0; i < Mappings.Length; i++) {
+            sb.Append('[');
+            foreach (var kv in Mappings[i]) {
+                sb.Append(kv.Key);
+                sb.Append(" -> ");
+                sb.Append(kv.Value);
+                sb.Append(", ");
+            }
+            sb.Append(']');
+            if (i != Mappings.Length - 1)
+                sb.Append(", ");
+        }
+        sb.Append(']');
+
+        return sb.ToString();
     }
 
     public StackEnv Push() => Push([]);
@@ -98,10 +122,23 @@ public record class StackEnv(ImmutableArray<ImmutableDictionary<VarName, ObjectS
 }
 
 public record class HeapEnv(ImmutableDictionary<(AbstractObjID, FieldName), ObjectSet> Mapping) {
+
+    public IEnumerable<InferenceVariable> GetInferenceVariables() => Mapping.Values.Where(v => v is ObjectInference.Var);
+
     public HeapEnv AddVar(AbstractObjID obj, FieldName name) {
         if (!Mapping.ContainsKey((obj, name)))
             return new HeapEnv(Mapping.Add((obj, name), ObjectSet.Create()));
         return this;
+    }
+
+    public override string ToString() {
+        StringBuilder sb = new StringBuilder();
+
+        sb.Append('[');
+        sb.AppendJoin(", ", Mapping.Select(kv => $"({kv.Key.Item1}, {kv.Key.Item2}) -> {kv.Value}"));
+        sb.Append(']');
+
+        return sb.ToString();
     }
 
     public HeapEnv SetObject(AbstractObjID obj, FieldName name, ObjectSet ID) {
@@ -145,11 +182,28 @@ public record class HeapEnv(ImmutableDictionary<(AbstractObjID, FieldName), Obje
 }
 
 public record class TypeEnv(ImmutableDictionary<AbstractObjID, Class> ClassMapping, ImmutableDictionary<AbstractObjID, TypeInference> ClosureMapping) {
+
+    public IEnumerable<InferenceVariable> GetInferenceVariables() => ClosureMapping.Values.Where(v => v is TypeInference.Var);
+
+
     public TypeEnv SetTypeClass(AbstractObjID ID, Class type) {
         if (!ClassMapping.ContainsKey(ID))
             return this with { ClassMapping = ClassMapping.Add(ID, type) };
         else
             return this with { ClassMapping = ClassMapping.Remove(ID).Add(ID, type) };
+    }
+
+    public override string ToString() {
+        StringBuilder sb = new StringBuilder();
+
+        sb.Append('[');
+        sb.AppendJoin(", ", ClassMapping.Select(kv => $"{kv.Key} -> {kv.Value}"));
+        if (ClassMapping.Count > 0 && ClosureMapping.Count > 0)
+            sb.Append(", ");
+        sb.AppendJoin(", ", ClosureMapping.Select(kv => $"{kv.Key} -> {kv.Value}"));
+        sb.Append(']');
+
+        return sb.ToString();
     }
 
     public TypeEnv SetTypeArrow(AbstractObjID ID, Arrow type) {
@@ -169,7 +223,7 @@ public record class TypeEnv(ImmutableDictionary<AbstractObjID, Class> ClassMappi
     public bool isClassObj(AbstractObjID ID) => ClassMapping.ContainsKey(ID);
 
     public Class GetVarClass(AbstractObjID ID) {
-        if (ClassMapping.TryGetValue(ID, out Class value))
+        if (ClassMapping.TryGetValue(ID, out Class? value))
             return value;
         else
             throw new ArgumentException($"Getting the type of an abstract object ID that does not exist; ID: {ID}");
@@ -211,6 +265,10 @@ public record class TypeEnv(ImmutableDictionary<AbstractObjID, Class> ClassMappi
 }
 
 public record class AliasEnv(ImmutableDictionary<AbstractObjID, AliasInference> Mapping) {
+
+    public IEnumerable<InferenceVariable> GetInferenceVariables() => Mapping.Values.Where(v => v is AliasInference.Var);
+
+
     public AliasEnv SetAlias(AbstractObjID ID, AliasInference alias) {
         if (!Mapping.ContainsKey(ID))
             return new(Mapping.Add(ID, alias));
@@ -218,6 +276,16 @@ public record class AliasEnv(ImmutableDictionary<AbstractObjID, AliasInference> 
             return new(Mapping.Remove(ID).Add(ID, alias));
     }
     public AliasEnv SetAlias(AbstractObjID ID, Alias alias) => SetAlias(ID, new AliasInference.Literal(alias));
+
+    public override string ToString() {
+        StringBuilder sb = new StringBuilder();
+
+        sb.Append('[');
+        sb.AppendJoin(", ", Mapping.Select(kv => $"{kv.Key} -> {kv.Value}"));
+        sb.Append(']');
+
+        return sb.ToString();
+    }
 
     public AliasInference GetVar(AbstractObjID ID) => Mapping[ID];
 
@@ -257,6 +325,8 @@ public record class AliasEnv(ImmutableDictionary<AbstractObjID, AliasInference> 
 
 public record class Environment(StackEnv StackMap, HeapEnv HeapMap, TypeEnv TypeMap, AliasEnv AliasMap) {
     public Environment() : this(new([]), new([]), new([], []), new([])) { }
+
+    public override string ToString() => $"{StackMap};{HeapMap};{TypeMap};{AliasMap}";
 
     public ObjectSet this[VarName name] => StackMap[name];
     public ObjectSet this[AbstractObjID obj, FieldName name] => HeapMap[obj, name];
@@ -303,4 +373,10 @@ public record class Environment(StackEnv StackMap, HeapEnv HeapMap, TypeEnv Type
 
     public Environment ApplySolution(InferenceVariableSolution Sol) =>
         new Environment(StackMap.ApplySolution(Sol), HeapMap.ApplySolution(Sol), TypeMap.ApplySolution(Sol), AliasMap.ApplySolution(Sol));
+
+    public IEnumerable<InferenceVariable> GetInferenceVariables() =>
+        StackMap.GetInferenceVariables()
+        .Append(HeapMap.GetInferenceVariables())
+        .Append(TypeMap.GetInferenceVariables())
+        .Append(AliasMap.GetInferenceVariables());
 }

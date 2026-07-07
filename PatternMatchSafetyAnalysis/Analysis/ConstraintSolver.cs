@@ -1,5 +1,7 @@
 using System.Collections.Immutable;
 using System.Data;
+using System.Diagnostics;
+using System.Text;
 using Analysis.Types;
 
 namespace Analysis;
@@ -7,18 +9,20 @@ namespace Analysis;
 
 public class ConstraintSolver {
     protected AbstractObjectIDAssigner Delta;
-    protected HashSet<InferenceConstraint> Constraints;
+    public ResolutionConstraintHandler Constraints;
 
-    public ConstraintSolver(AbstractObjectIDAssigner Delta, HashSet<InferenceConstraint> Constraints) {
+
+    public ImmutableHashSet<InferenceConstraint> InferenceConstraints => [..Constraints.Constraints];
+    public string PrintConstraints() => Constraints.PrintConstraints();
+
+    public ConstraintSolver(AbstractObjectIDAssigner Delta, IEnumerable<InferenceConstraint> Constraints) {
         this.Delta = Delta;
-        this.Constraints = Constraints;
+        this.Constraints = new ResolutionConstraintHandler(Constraints);
     }
 
-    protected IEnumerable<T> GetConstraints<T>() where T : InferenceConstraint => Constraints.Where(c => c is T).Select(c => (T)c);
-
-    protected bool Transitivity<T, L>() where T : InferenceConstraint.PartialOrder<T, L> where L : InferenceVariable {
+    protected bool Transitivity<T, L>(IEnumerable<T> cons) where T : InferenceConstraint.PartialOrder<T, L> where L : InferenceVariable {
         bool added = false;
-        IEnumerable<T> objIncl = Constraints.Where(con => con is T).Select(con => (T)con);
+        ImmutableHashSet<T> objIncl = [..cons];//[..Constraints.Where(con => con is T).Select(con => (T)con)];
         foreach (var l in objIncl) {
             foreach (var r in objIncl) {
                 if (T.isTransitive(l, r))
@@ -28,15 +32,15 @@ public class ConstraintSolver {
         return added;
     }
 
-    protected bool TransitivityObj() => Transitivity<InferenceConstraint.ObjectInclusion, ObjectInference>();
-    protected bool TransitivityType() => Transitivity<InferenceConstraint.SubTyping, TypeInference>();
-    protected bool TransitivityAlias() => Transitivity<InferenceConstraint.AliasBounding, AliasInference>();
+    protected bool TransitivityObj() => Transitivity<InferenceConstraint.ObjectInclusion, ObjectInference>(Constraints.ObjectInclusions);
+    protected bool TransitivityType() => Transitivity<InferenceConstraint.SubTyping, TypeInference>(Constraints.SubTypings);
+    protected bool TransitivityAlias() => Transitivity<InferenceConstraint.AliasBounding, AliasInference>(Constraints.AliasBoundings);
 
     protected bool Satisfaction() {
         bool added = false;
-        IEnumerable<InferenceConstraint.Conditional> conds = GetConstraints<InferenceConstraint.Conditional>();
-        HashSet<InferenceConstraint.SubTyping> tys = [.. GetConstraints<InferenceConstraint.SubTyping>()];
-        HashSet<InferenceConstraint.AliasBounding> als = [.. GetConstraints<InferenceConstraint.AliasBounding>()];
+        ImmutableHashSet<InferenceConstraint.Conditional> conds = [..Constraints.Conditionals];
+        ImmutableHashSet<InferenceConstraint.SubTyping> tys = [.. Constraints.SubTypings];
+        ImmutableHashSet<InferenceConstraint.AliasBounding> als = [.. Constraints.AliasBoundings];
 
         foreach (var c in conds) {
             ImmutableHashSet<InferenceConstraint.SubTyping> guardT = [.. c.GuardType.Where(t => !tys.Contains(t))];
@@ -55,13 +59,14 @@ public class ConstraintSolver {
 
     protected bool Weakening() {
         bool added = false;
-        IEnumerable<InferenceConstraint.Conditional> conds = GetConstraints<InferenceConstraint.Conditional>();
-        IEnumerable<InferenceConstraint.SubTyping> tys = GetConstraints<InferenceConstraint.SubTyping>();
-        IEnumerable<InferenceConstraint.AliasBounding> als = GetConstraints<InferenceConstraint.AliasBounding>();
+        ImmutableHashSet<InferenceConstraint.Conditional> conds = [..Constraints.Conditionals];
+        ImmutableHashSet<InferenceConstraint.SubTyping> tys = [..Constraints.SubTypings];
+        ImmutableHashSet<InferenceConstraint.AliasBounding> als = [..Constraints.AliasBoundings];
 
         foreach (var c in conds) {
             foreach (var guardA in c.GuardAlias) {
-                foreach (var weak in als.Where(a => a.r.Equals(guardA.r))) {
+                ImmutableHashSet<InferenceConstraint.AliasBounding> tmp = [.. als.Where(a => a.r.Equals(guardA.r))];
+                foreach (var weak in tmp) {
                     added = added || Constraints.Add(new InferenceConstraint.Conditional(
                         c.GuardType,
                         [.. c.GuardAlias.Select(a => a == guardA ? new InferenceConstraint.AliasBounding(a.l, weak.l) : a)],
@@ -69,7 +74,8 @@ public class ConstraintSolver {
                 }
             }
             foreach (var guardT in c.GuardType) {
-                foreach (var weak in tys.Where(a => a.r.Equals(guardT.r))) {
+                ImmutableHashSet<InferenceConstraint.SubTyping> tmp = [.. tys.Where(a => a.r.Equals(guardT.r))];
+                foreach (var weak in tmp) {
                     added = added || Constraints.Add(new InferenceConstraint.Conditional(
                         [.. c.GuardType.Select(a => a == guardT ? new InferenceConstraint.SubTyping(a.l, weak.l) : a)],
                         c.GuardAlias,
@@ -82,21 +88,21 @@ public class ConstraintSolver {
 
     protected bool HeapUpdate() {
         bool added = false;
-        IEnumerable<InferenceConstraint.HeapUpdate> HUs = GetConstraints<InferenceConstraint.HeapUpdate>();
-        Dictionary<AbstractObjID, InferenceConstraint.ObjectInclusion> objIncl = GetConstraints<InferenceConstraint.ObjectInclusion>().Where(c => c.l is ObjectInference.Literal && c.r is ObjectInference.Var)
-            .Select(c => new KeyValuePair<AbstractObjID, InferenceConstraint.ObjectInclusion>(((ObjectInference.Var)c.r).ID, c)).ToDictionary();
-        Dictionary<int, InferenceConstraint.AliasBounding> alsIncl = GetConstraints<InferenceConstraint.AliasBounding>().Where(c => c.l is AliasInference.Literal && c.r is AliasInference.Var)
-            .Select(c => new KeyValuePair<int, InferenceConstraint.AliasBounding>(((AliasInference.Var)c.r).ID, c)).ToDictionary(); ;
+        ImmutableHashSet<InferenceConstraint.HeapUpdate> HUs = [..Constraints.HeapUpdates];
+        ImmutableDictionary<int, ImmutableHashSet<AbstractObjID>> objSol = [..ReadObjSolution()
+            .Select(kv => new KeyValuePair<int, ImmutableHashSet<AbstractObjID>>(kv.Key.ID, kv.Value))];
+        ImmutableDictionary<int, AliasFlag> aliasSol = [..ReadAliasSolution()
+            .Select(kv => new KeyValuePair<int, AliasFlag>(kv.Key.ID, kv.Value))];
 
         foreach (var hu in HUs) {
-            if (objIncl.TryGetValue(hu.ObjIn.ID, out InferenceConstraint.ObjectInclusion? value)) {
-                foreach (var o in ((ObjectInference.Literal)value.l).Objects) {
+            if (objSol.TryGetValue(hu.ObjIn.ID, out ImmutableHashSet<AbstractObjID>? value)) {
+                foreach (var o in value) {
                     Constraints.Add(new InferenceConstraint.ObjectInclusion(hu.ObjTo, hu.Out[o, hu.Name])); //Update-Inclusion
                     foreach (var dom in hu.In.HeapMap.Mapping.Keys) {
-                        if ((hu.In.AliasMap[o] is AliasInference.Var v && alsIncl.ContainsKey(v.ID)) || (hu.In.AliasMap[o] is AliasInference.Literal l && l.Flag.Equals(AliasFlag.M))) {
+                        if ((hu.In.AliasMap[o] is AliasInference.Var v && aliasSol.ContainsKey(v.ID) && aliasSol[v.ID] == AliasFlag.M) || (hu.In.AliasMap[o] is AliasInference.Literal l && l.Flag.Equals(AliasFlag.M))) {
                             added = added || Constraints.Add(new InferenceConstraint.ObjectInclusion(hu.In[dom.Item1, dom.Item2], hu.Out[dom.Item1, dom.Item2])); //Alias-M-Bound
                         }
-                        if (o != dom.Item1) {
+                        if (!o.Equals(dom.Item1)) {
                             added = added || Constraints.Add(new InferenceConstraint.ObjectInclusion(hu.In[dom.Item1, dom.Item2], hu.Out[dom.Item1, dom.Item2])); //WU-Passthrough
                         }
                         if (!hu.Name.Equals(dom.Item2)) {
@@ -111,13 +117,13 @@ public class ConstraintSolver {
 
     protected bool HeapLookup() {
         bool added = false;
-        IEnumerable<InferenceConstraint.HeapLookup> HLs = GetConstraints<InferenceConstraint.HeapLookup>();
-        Dictionary<AbstractObjID, InferenceConstraint.ObjectInclusion> objIncl = GetConstraints<InferenceConstraint.ObjectInclusion>().Where(c => c.l is ObjectInference.Literal && c.r is ObjectInference.Var)
-            .Select(c => new KeyValuePair<AbstractObjID, InferenceConstraint.ObjectInclusion>(((ObjectInference.Var)c.r).ID, c)).ToDictionary();
+        ImmutableHashSet<InferenceConstraint.HeapLookup> HLs = [..Constraints.HeapLookups];
+        ImmutableDictionary<int, ImmutableHashSet<AbstractObjID>> objSol = [..ReadObjSolution()
+            .Select(kv => new KeyValuePair<int, ImmutableHashSet<AbstractObjID>>(kv.Key.ID, kv.Value))];
 
         foreach (var hl in HLs) {
-            if (objIncl.TryGetValue(hl.Obj.ID, out InferenceConstraint.ObjectInclusion? value)) {
-                foreach (var o in ((ObjectInference.Literal)value.l).Objects) {
+            if (objSol.TryGetValue(hl.Obj.ID, out ImmutableHashSet<AbstractObjID>? value)) {
+                foreach (var o in value) {
                     added = added || Constraints.Add(new InferenceConstraint.ObjectInclusion(hl.Env[o, hl.Name], hl.Out)); //HL-Inclusion
                 }
             }
@@ -127,13 +133,13 @@ public class ConstraintSolver {
 
     protected bool TypeLookup() {
         bool added = false;
-        IEnumerable<InferenceConstraint.TypeLookup> TLs = GetConstraints<InferenceConstraint.TypeLookup>();
-        Dictionary<AbstractObjID, InferenceConstraint.ObjectInclusion> objIncl = GetConstraints<InferenceConstraint.ObjectInclusion>().Where(c => c.l is ObjectInference.Literal && c.r is ObjectInference.Var)
-            .Select(c => new KeyValuePair<AbstractObjID, InferenceConstraint.ObjectInclusion>(((ObjectInference.Var)c.r).ID, c)).ToDictionary();
+        ImmutableHashSet<InferenceConstraint.TypeLookup> TLs = [..Constraints.TypeLookups];
+        ImmutableDictionary<int, ImmutableHashSet<AbstractObjID>> objSol = [..ReadObjSolution()
+            .Select(kv => new KeyValuePair<int, ImmutableHashSet<AbstractObjID>>(kv.Key.ID, kv.Value))];
 
         foreach (var tl in TLs) {
-            if (objIncl.TryGetValue(tl.Objs.ID, out InferenceConstraint.ObjectInclusion? value)) {
-                foreach (var o in ((ObjectInference.Literal)value.l).Objects) {
+            if (objSol.TryGetValue(tl.Objs.ID, out ImmutableHashSet<AbstractObjID>? value)) {
+                foreach (var o in value) {
                     added = added || Constraints.Add(new InferenceConstraint.SubTyping(tl.Env.TypeMap[o], tl.TypeOut)); //TL-Inclusion
                 }
             }
@@ -143,14 +149,14 @@ public class ConstraintSolver {
 
     protected bool Restrict() {
         bool added = false;
-        IEnumerable<InferenceConstraint.Restriction> Rs = GetConstraints<InferenceConstraint.Restriction>();
-        Dictionary<AbstractObjID, InferenceConstraint.ObjectInclusion> objIncl = GetConstraints<InferenceConstraint.ObjectInclusion>().Where(c => c.l is ObjectInference.Literal && c.r is ObjectInference.Var)
-            .Select(c => new KeyValuePair<AbstractObjID, InferenceConstraint.ObjectInclusion>(((ObjectInference.Var)c.r).ID, c)).ToDictionary();
+        ImmutableHashSet<InferenceConstraint.Restriction> Rs = [..Constraints.Restrictions];
+        ImmutableDictionary<int, ImmutableHashSet<AbstractObjID>> objSol = [..ReadObjSolution()
+            .Select(kv => new KeyValuePair<int, ImmutableHashSet<AbstractObjID>>(kv.Key.ID, kv.Value))];
 
         foreach (var r in Rs) {
             added = added || Constraints.Add(new InferenceConstraint.ObjectInclusion(r.Out, r.In)); //RT-Bound
-            if (objIncl.TryGetValue(r.In.ID, out InferenceConstraint.ObjectInclusion? value)) {
-                foreach (var o in ((ObjectInference.Literal)value.l).Objects) {
+            if (objSol.TryGetValue(r.In.ID, out ImmutableHashSet<AbstractObjID>? value)) {
+                foreach (var o in value) {
                     added = added || Constraints.Add(new InferenceConstraint.Conditional(
                         [new InferenceConstraint.SubTyping(r.Env.TypeMap[o], new TypeInference.Literal([r.Tau]))],
                         [],
@@ -164,17 +170,17 @@ public class ConstraintSolver {
 
     protected bool ApplicationResolution() {
         bool added = false;
-        IEnumerable<InferenceConstraint.ApplicationResolution> Apps = GetConstraints<InferenceConstraint.ApplicationResolution>();
-        Dictionary<AbstractObjID, InferenceConstraint.ObjectInclusion> objIncl = GetConstraints<InferenceConstraint.ObjectInclusion>().Where(c => c.l is ObjectInference.Literal && c.r is ObjectInference.Var)
-            .Select(c => new KeyValuePair<AbstractObjID, InferenceConstraint.ObjectInclusion>(((ObjectInference.Var)c.r).ID, c)).ToDictionary();
-        Dictionary<int, InferenceConstraint.SubTyping> subTy = GetConstraints<InferenceConstraint.SubTyping>().Where(c => c.l is TypeInference.Literal && c.r is TypeInference.Var)
-            .Select(c => new KeyValuePair<int, InferenceConstraint.SubTyping>(((ObjectInference.Var)c.r).ID, c)).ToDictionary();
-
+        ImmutableHashSet<InferenceConstraint.ApplicationResolution> Apps = [..Constraints.ApplicationResolutions];
+        ImmutableDictionary<int, ImmutableHashSet<AbstractObjID>> objSol = [..ReadObjSolution()
+            .Select(kv => new KeyValuePair<int, ImmutableHashSet<AbstractObjID>>(kv.Key.ID, kv.Value))];
+        ImmutableDictionary<int, ImmutableHashSet<Types.Type>> typeSol = [..ReadTypeSolution()
+            .Select(kv => new KeyValuePair<int, ImmutableHashSet<Types.Type>>(kv.Key.ID, kv.Value))];
+        
         foreach (var ap in Apps) {
             added = added || AppTL(ap);
 
-            if (subTy.TryGetValue(ap.TypeInternal.ID, out InferenceConstraint.SubTyping? value)) {
-                foreach (var ty in ((TypeInference.Literal)value.l).Types) {
+            if (typeSol.TryGetValue(ap.TypeInternal.ID, out ImmutableHashSet<Types.Type>? value)) {
+                foreach (var ty in value) {
                     if (ty is Arrow arr) {
                         added = added || Constraints.Add(new InferenceConstraint.ObjectInclusion(arr.Return, ap.ObjOut));
                         foreach (var c in arr.Post <= ap.EnvOut) {
@@ -189,9 +195,9 @@ public class ConstraintSolver {
                                 added = added || Constraints.Add(new InferenceConstraint.ObjectInclusion(ap.Arguments[i], arr.Pre[x]));
                             }
                             else { //AppCapture
-                                ImmutableHashSet<AbstractObjID> objs = ImmutableHashSet<AbstractObjID>.Empty;
-                                if (arr.Pre[x] is ObjectInference.Var v && objIncl.TryGetValue(v.ID, out InferenceConstraint.ObjectInclusion? incl) && incl.l is ObjectInference.Literal ol)
-                                    objs = ol.Objects;
+                                ImmutableHashSet<AbstractObjID> objs = [];
+                                if (arr.Pre[x] is ObjectInference.Var v && objSol.TryGetValue(v.ID, out ImmutableHashSet<AbstractObjID>? val))
+                                    objs = val;
                                 else if (arr.Pre[x] is ObjectInference.Literal l)
                                     objs = l.Objects;
 
@@ -228,11 +234,24 @@ public class ConstraintSolver {
         return added;
     }
 
-    protected void FindFixpoint() {
+    public void FindFixpoint() {
         bool ConstraintsChanged = true;
+        // int size = Constraints.Constraints.Count();
         while (ConstraintsChanged) {
             ConstraintsChanged = RunRules();
+            // int newSize = Constraints.Constraints.Count();
+            // if (size == newSize && ConstraintsChanged)
+            //     throw new Exception("HashSet Add Broken...");
+            // size = newSize;
+            // if (size > 8) {
+            //     StringBuilder b = new StringBuilder();
+            //     foreach (var c in Constraints.Constraints) {
+            //         b.AppendLine(c.ToString());
+            //     }
+            //     throw new Exception("Large constraint set found (> 8): \n" + b.ToString());
+            // }
         }
+        RunRules();
     }
 
     protected bool RunRules() =>
@@ -247,14 +266,11 @@ public class ConstraintSolver {
         || Restrict()
         || ApplicationResolution();
 
-    protected InferenceVariableSolution ReadSolutionFromConstraints() {
-        IEnumerable<InferenceConstraint.ObjectInclusion> objIncl = GetConstraints<InferenceConstraint.ObjectInclusion>().Where(c => c.l is ObjectInference.Literal && c.r is ObjectInference.Var);
-        IEnumerable<InferenceConstraint.SubTyping> subTy = GetConstraints<InferenceConstraint.SubTyping>().Where(c => c.l is TypeInference.Literal && c.r is TypeInference.Var);
-        IEnumerable<InferenceConstraint.AliasBounding> als = GetConstraints<InferenceConstraint.AliasBounding>().Where(c => c.l is AliasInference.Literal && c.r is AliasInference.Var);
+    //Maintain partial solution(s) throughout resolution? 
+    protected ImmutableDictionary<ObjectInference.Var, ImmutableHashSet<AbstractObjID>> ReadObjSolution() {
+        IEnumerable<InferenceConstraint.ObjectInclusion> objIncl = Constraints.ObjectInclusions.Where(c => c.l is ObjectInference.Literal && c.r is ObjectInference.Var);
 
         Dictionary<ObjectInference.Var, HashSet<AbstractObjID>> ObjSol = new Dictionary<ObjectInference.Var, HashSet<int>>();
-        Dictionary<TypeInference.Var, HashSet<Types.Type>> TypeSol = new Dictionary<TypeInference.Var, HashSet<Types.Type>>();
-        Dictionary<AliasInference.Var, AliasFlag> AliasSol = new Dictionary<AliasInference.Var, AliasFlag>();
 
         foreach (var c in objIncl) {
             ObjectInference.Var k = (ObjectInference.Var)c.r;
@@ -268,6 +284,14 @@ public class ConstraintSolver {
             }
         }
 
+        return [.. ObjSol.Select(kv => new KeyValuePair<ObjectInference.Var, ImmutableHashSet<AbstractObjID>>(kv.Key, [.. kv.Value]))];
+    }
+
+    protected ImmutableDictionary<TypeInference.Var, ImmutableHashSet<Types.Type>> ReadTypeSolution() {
+        IEnumerable<InferenceConstraint.SubTyping> subTy = Constraints.SubTypings.Where(c => c.l is TypeInference.Literal && c.r is TypeInference.Var);
+
+        Dictionary<TypeInference.Var, HashSet<Types.Type>> TypeSol = new Dictionary<TypeInference.Var, HashSet<Types.Type>>();
+
         foreach (var c in subTy) {
             TypeInference.Var k = (TypeInference.Var)c.r;
             TypeInference.Literal v = (TypeInference.Literal)c.l;
@@ -280,21 +304,36 @@ public class ConstraintSolver {
             }
         }
 
+        return [..TypeSol.Select(kv => new KeyValuePair<TypeInference.Var, ImmutableHashSet<Types.Type>>(kv.Key, [.. kv.Value]))];
+    }
+
+    protected ImmutableDictionary<AliasInference.Var, AliasFlag> ReadAliasSolution() {
+        IEnumerable<InferenceConstraint.AliasBounding> als = Constraints.AliasBoundings.Where(c => c.l is AliasInference.Literal && c.r is AliasInference.Var);
+
+        Dictionary<AliasInference.Var, AliasFlag> AliasSol = new Dictionary<AliasInference.Var, AliasFlag>();
+
         foreach (var c in als) {
             AliasInference.Var k = (AliasInference.Var)c.r;
             AliasInference.Literal v = (AliasInference.Literal)c.l;
 
-            AliasSol.Add(k, v.Flag.Flag);
+            if (!AliasSol.ContainsKey(k))
+                AliasSol.Add(k, v.Flag.Flag);
+            else {
+                if (AliasSol[k] == AliasFlag.S && v.Flag.Flag == AliasFlag.M)
+                    AliasSol[k] = v.Flag.Flag;
+            }
         }
 
-        return new InferenceVariableSolution(
-            ObjSol.Select(kv => new KeyValuePair<ObjectInference.Var, ImmutableHashSet<int>>(kv.Key, [.. kv.Value])).ToImmutableDictionary(),
-            TypeSol.Select(kv => new KeyValuePair<TypeInference.Var, ImmutableHashSet<Types.Type>>(kv.Key, [.. kv.Value])).ToImmutableDictionary(),
-            [.. AliasSol]
-        );
+        return [.. AliasSol];
     }
 
-    protected bool IsTypeSafe() => Constraints.Any(c => c.IsTrivialUnsat(Delta));
+    protected InferenceVariableSolution ReadSolutionFromConstraints() => new InferenceVariableSolution(
+            ReadObjSolution(),
+            ReadTypeSolution(),
+            ReadAliasSolution()
+        );
+
+    public bool IsTypeSafe() => Constraints.PartialOrders.Any(c => c.IsTrivialUnsat(Delta));
 
 
 }
