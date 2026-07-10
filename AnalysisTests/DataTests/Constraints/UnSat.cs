@@ -2,6 +2,7 @@ using Analysis.Types;
 using Environment = Analysis.Types.Environment;
 using AnalysisTests.Util;
 using Analysis;
+using Microsoft.CodeAnalysis;
 
 namespace AnalysisTests.DataTests.Constraints;
 
@@ -17,7 +18,7 @@ public sealed class UnSat {
 #pragma warning disable CS8625 // Cannot convert null literal to non-nullable reference type.
         AbstractObjectIDAssigner Delta = new AbstractObjectIDAssigner(null);
 #pragma warning restore CS8625 // Cannot convert null literal to non-nullable reference type.
-        InferenceConstraint.ObjectInclusion c = new InferenceConstraint.ObjectInclusion(new ObjectInference.Literal([0]), new ObjectInference.Literal([]));
+        InferenceConstraint.ObjectInclusion c = new InferenceConstraint.ObjectInclusion(new ObjectInference.Literal([0], new Optional<(string, SyntaxNode)>()), new ObjectInference.Literal([], new Optional<(string, SyntaxNode)>()));
 
         Assert.IsTrue(c.IsTrivialUnsat(Delta));
     }
@@ -29,7 +30,7 @@ public sealed class UnSat {
 #pragma warning disable CS8625 // Cannot convert null literal to non-nullable reference type.
         AbstractObjectIDAssigner Delta = new AbstractObjectIDAssigner(null);
 #pragma warning restore CS8625 // Cannot convert null literal to non-nullable reference type.
-        InferenceConstraint.ObjectInclusion c = new InferenceConstraint.ObjectInclusion(new ObjectInference.Literal([0, 1]), new ObjectInference.Literal([0, 1, 2]));
+        InferenceConstraint.ObjectInclusion c = new InferenceConstraint.ObjectInclusion(new ObjectInference.Literal([0, 1], new Optional<(string, SyntaxNode)>()), new ObjectInference.Literal([0, 1, 2], new Optional<(string, SyntaxNode)>()));
 
         Assert.IsFalse(c.IsTrivialUnsat(Delta));
     }
@@ -67,7 +68,7 @@ public sealed class UnSat {
 #pragma warning disable CS8625 // Cannot convert null literal to non-nullable reference type.
         AbstractObjectIDAssigner Delta = new AbstractObjectIDAssigner(null);
 #pragma warning restore CS8625 // Cannot convert null literal to non-nullable reference type.
-        InferenceConstraint.SubTyping c = new InferenceConstraint.SubTyping(new TypeInference.Literal([new Class("A")]), new TypeInference.Literal([]));
+        InferenceConstraint.SubTyping c = new InferenceConstraint.SubTyping(new TypeInference.Literal([new Class("A")], new Optional<(string, SyntaxNode)>()), new TypeInference.Literal([], new Optional<(string, SyntaxNode)>()));
 
         Assert.IsTrue(c.IsTrivialUnsat(Delta));
     }
@@ -79,7 +80,7 @@ public sealed class UnSat {
 #pragma warning disable CS8625 // Cannot convert null literal to non-nullable reference type.
         AbstractObjectIDAssigner Delta = new AbstractObjectIDAssigner(null);
 #pragma warning restore CS8625 // Cannot convert null literal to non-nullable reference type.
-        InferenceConstraint.SubTyping c = new InferenceConstraint.SubTyping(new TypeInference.Literal([new Class("A")]), new TypeInference.Literal([new Class("A")]));
+        InferenceConstraint.SubTyping c = new InferenceConstraint.SubTyping(new TypeInference.Literal([new Class("A")], new Optional<(string, SyntaxNode)>()), new TypeInference.Literal([new Class("A")], new Optional<(string, SyntaxNode)>()));
 
         Assert.IsFalse(c.IsTrivialUnsat(Delta));
     }

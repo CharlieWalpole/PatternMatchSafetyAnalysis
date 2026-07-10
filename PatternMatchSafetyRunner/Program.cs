@@ -26,57 +26,73 @@ public class Program {
     public static void foo() { var x = new C(); }
 }
 ";
+
     public static void Main() {
-        SyntaxTree tree = CSharpSyntaxTree.ParseText(exampleProgram);
-        CompilationUnitSyntax root = tree.GetCompilationUnitRoot();
-        CSharpCompilation compilation = CSharpCompilation.Create("HelloWorld").AddSyntaxTrees(tree);
-        SemanticModel semanticModel = compilation.GetSemanticModel(tree) ?? throw new Exception("Semantic model was null.");
+        StringRunner runner = new StringRunner(exampleProgram);
+        AnalysisConclusion conc = runner.RunAnalysis();
 
-        AbstractObjectIDAssigner assigner = new AbstractObjectIDAssigner(semanticModel);
-
-        MethodCollector collector = new MethodCollector(semanticModel);
-        root.Accept(assigner);
-        root.Accept(collector);
-
-        foreach (var item in assigner.AbstractObjectIDsToCodeLocations) {
-            if(assigner.TypeMap.isClassObj(item.Key)) {
-                Console.WriteLine($"Constructor call occurred at {item.Value.Span} and was assigned ID {item.Key} with type {assigner.TypeMap[item.Key]}.");
-                Console.Write($"\tID has fields: ");
-                foreach (var dom in assigner.HeapDomain) {
-                    if (dom.Item1.Equals(item.Key))
-                        Console.Write($"{dom.Item2}, ");
-                }
-                Console.WriteLine();
-            } else {
-                Console.WriteLine($"Closure definition occurred at {item.Value} and was assigned ID {item.Key}.");
-            }
+        if (conc.Errors.IsEmpty) {
+            Console.WriteLine("No type errors found.");
         }
-
-        foreach (var item in collector.MethodSet) {
-            Console.WriteLine($"Found method: {item.GetName()}.");
-
-            foreach (var func in collector.CallMap[item])
-                Console.WriteLine($"Found {(func.isMethodDecl ? "method" : "constructor")} call from {item.GetName()} to {func.GetName()}.");
-        }
-
-        Console.WriteLine("Call graph closure:");
-        foreach (var item in collector.GetCallMapTransClosure()) {
-            Console.WriteLine($"\tFrom {item.Key.GetName()} to:");
-            foreach (var dest in item.Value) {
-                Console.WriteLine($"\t\t{dest.GetName()}");
+        else {
+            Console.WriteLine($"{conc.Errors.Count} Type Errors found: \n");
+            foreach (AnalysisError err in conc.Errors) {
+                Console.WriteLine(err);
             }
-        }
-
-        Console.WriteLine();
-        Console.WriteLine("Analysis order is: ");
-        int i = 0;
-        foreach (AnalysisUnit unit in collector.AnalysisOrdering) {
-            Console.WriteLine($"\tUnit number {i} containing: ");
-            foreach (var item in unit.Defns) {
-                Console.WriteLine($"\t\t{(item.isMethodDecl ? "Method" : "Constructor")}: {item.GetName()}.");
-            }
-            i++;
         }
     }
+
+    // public static void Main() {
+    //     SyntaxTree tree = CSharpSyntaxTree.ParseText(exampleProgram);
+    //     CompilationUnitSyntax root = tree.GetCompilationUnitRoot();
+    //     CSharpCompilation compilation = CSharpCompilation.Create("HelloWorld").AddSyntaxTrees(tree);
+    //     SemanticModel semanticModel = compilation.GetSemanticModel(tree) ?? throw new Exception("Semantic model was null.");
+
+    //     AbstractObjectIDAssigner assigner = new AbstractObjectIDAssigner(semanticModel);
+
+    //     MethodCollector collector = new MethodCollector(semanticModel);
+    //     root.Accept(assigner);
+    //     root.Accept(collector);
+
+    //     foreach (var item in assigner.AbstractObjectIDsToCodeLocations) {
+    //         if(assigner.TypeMap.isClassObj(item.Key)) {
+    //             Console.WriteLine($"Constructor call occurred at {item.Value.Span} and was assigned ID {item.Key} with type {assigner.TypeMap[item.Key]}.");
+    //             Console.Write($"\tID has fields: ");
+    //             foreach (var dom in assigner.HeapDomain) {
+    //                 if (dom.Item1.Equals(item.Key))
+    //                     Console.Write($"{dom.Item2}, ");
+    //             }
+    //             Console.WriteLine();
+    //         } else {
+    //             Console.WriteLine($"Closure definition occurred at {item.Value} and was assigned ID {item.Key}.");
+    //         }
+    //     }
+
+    //     foreach (var item in collector.MethodSet) {
+    //         Console.WriteLine($"Found method: {item.GetName()}.");
+
+    //         foreach (var func in collector.CallMap[item])
+    //             Console.WriteLine($"Found {(func.isMethodDecl ? "method" : "constructor")} call from {item.GetName()} to {func.GetName()}.");
+    //     }
+
+    //     Console.WriteLine("Call graph closure:");
+    //     foreach (var item in collector.GetCallMapTransClosure()) {
+    //         Console.WriteLine($"\tFrom {item.Key.GetName()} to:");
+    //         foreach (var dest in item.Value) {
+    //             Console.WriteLine($"\t\t{dest.GetName()}");
+    //         }
+    //     }
+
+    //     Console.WriteLine();
+    //     Console.WriteLine("Analysis order is: ");
+    //     int i = 0;
+    //     foreach (AnalysisUnit unit in collector.AnalysisOrdering) {
+    //         Console.WriteLine($"\tUnit number {i} containing: ");
+    //         foreach (var item in unit.Defns) {
+    //             Console.WriteLine($"\t\t{(item.isMethodDecl ? "Method" : "Constructor")}: {item.GetName()}.");
+    //         }
+    //         i++;
+    //     }
+    // }
 
 }

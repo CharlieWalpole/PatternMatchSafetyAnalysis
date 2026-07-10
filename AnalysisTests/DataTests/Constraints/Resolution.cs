@@ -3,6 +3,7 @@ using Environment = Analysis.Types.Environment;
 using AnalysisTests.Util;
 using Analysis;
 using System.Collections.Immutable;
+using Microsoft.CodeAnalysis;
 
 namespace AnalysisTests.DataTests.Constraints;
 
@@ -19,9 +20,9 @@ public sealed class Resolution {
 #pragma warning disable CS8625 // Cannot convert null literal to non-nullable reference type.
         AbstractObjectIDAssigner Delta = new AbstractObjectIDAssigner(null);
 #pragma warning restore CS8625 // Cannot convert null literal to non-nullable reference type.
-        InferenceConstraint.ObjectInclusion c1 = new InferenceConstraint.ObjectInclusion(new ObjectInference.Var(0), new ObjectInference.Var(1));
-        InferenceConstraint.ObjectInclusion c2 = new InferenceConstraint.ObjectInclusion(new ObjectInference.Var(1), new ObjectInference.Var(2));
-        InferenceConstraint.ObjectInclusion c3 = new InferenceConstraint.ObjectInclusion(new ObjectInference.Var(0), new ObjectInference.Var(2));
+        InferenceConstraint.ObjectInclusion c1 = new InferenceConstraint.ObjectInclusion(new ObjectInference.Var(0, new Optional<(string, SyntaxNode)>()), new ObjectInference.Var(1, new Optional<(string, SyntaxNode)>()));
+        InferenceConstraint.ObjectInclusion c2 = new InferenceConstraint.ObjectInclusion(new ObjectInference.Var(1, new Optional<(string, SyntaxNode)>()), new ObjectInference.Var(2, new Optional<(string, SyntaxNode)>()));
+        InferenceConstraint.ObjectInclusion c3 = new InferenceConstraint.ObjectInclusion(new ObjectInference.Var(0, new Optional<(string, SyntaxNode)>()), new ObjectInference.Var(2, new Optional<(string, SyntaxNode)>()));
 
         ConstraintSolver solver = new ConstraintSolver(Delta, [c1, c2]);
 
@@ -45,9 +46,9 @@ public sealed class Resolution {
 #pragma warning disable CS8625 // Cannot convert null literal to non-nullable reference type.
         AbstractObjectIDAssigner Delta = new AbstractObjectIDAssigner(null);
 #pragma warning restore CS8625 // Cannot convert null literal to non-nullable reference type.
-        InferenceConstraint.ObjectInclusion c1 = new InferenceConstraint.ObjectInclusion(new ObjectInference.Var(0), new ObjectInference.Var(1));
-        InferenceConstraint.ObjectInclusion c2 = new InferenceConstraint.ObjectInclusion(new ObjectInference.Var(1), new ObjectInference.Literal([0]));
-        InferenceConstraint.ObjectInclusion c3 = new InferenceConstraint.ObjectInclusion(new ObjectInference.Var(0), new ObjectInference.Literal([0]));
+        InferenceConstraint.ObjectInclusion c1 = new InferenceConstraint.ObjectInclusion(new ObjectInference.Var(0, new Optional<(string, SyntaxNode)>()), new ObjectInference.Var(1, new Optional<(string, SyntaxNode)>()));
+        InferenceConstraint.ObjectInclusion c2 = new InferenceConstraint.ObjectInclusion(new ObjectInference.Var(1, new Optional<(string, SyntaxNode)>()), new ObjectInference.Literal([0], new Optional<(string, SyntaxNode)>()));
+        InferenceConstraint.ObjectInclusion c3 = new InferenceConstraint.ObjectInclusion(new ObjectInference.Var(0, new Optional<(string, SyntaxNode)>()), new ObjectInference.Literal([0], new Optional<(string, SyntaxNode)>()));
 
         ConstraintSolver solver = new ConstraintSolver(Delta, [c1, c2]);
 
@@ -164,8 +165,8 @@ public sealed class Resolution {
         AbstractObjectIDAssigner Delta = new AbstractObjectIDAssigner(null);
 #pragma warning restore CS8625 // Cannot convert null literal to non-nullable reference type.
 
-        InferenceConstraint.SubTyping t = new InferenceConstraint.SubTyping(new TypeInference.Var(0), new TypeInference.Var(1));
-        InferenceConstraint ts = new InferenceConstraint.ObjectInclusion(new ObjectInference.Var(0), new ObjectInference.Var(1));
+        InferenceConstraint.SubTyping t = new InferenceConstraint.SubTyping(new TypeInference.Var(0, new Optional<(string, SyntaxNode)>()), new TypeInference.Var(1, new Optional<(string, SyntaxNode)>()));
+        InferenceConstraint ts = new InferenceConstraint.ObjectInclusion(new ObjectInference.Var(0, new Optional<(string, SyntaxNode)>()), new ObjectInference.Var(1, new Optional<(string, SyntaxNode)>()));
 
         InferenceConstraint.Conditional c = new InferenceConstraint.Conditional([t], [], [ts]);
 
@@ -229,7 +230,7 @@ public sealed class Resolution {
 #pragma warning restore CS8625 // Cannot convert null literal to non-nullable reference type.
 
         InferenceConstraint.AliasBounding t = new InferenceConstraint.AliasBounding(new AliasInference.Var(0), new AliasInference.Var(1));
-        InferenceConstraint ts = new InferenceConstraint.ObjectInclusion(new ObjectInference.Var(0), new ObjectInference.Var(1));
+        InferenceConstraint ts = new InferenceConstraint.ObjectInclusion(new ObjectInference.Var(0, new Optional<(string, SyntaxNode)>()), new ObjectInference.Var(1, new Optional<(string, SyntaxNode)>()));
 
         InferenceConstraint.Conditional c = new InferenceConstraint.Conditional([], [t], [ts]);
 
@@ -343,28 +344,28 @@ public sealed class Resolution {
         AliasInference obj1AliasVarOut = new AliasInference.Var(1);
         Class obj1ClassC = new Class("C");
 
-        ObjectInference.Var o1 = new ObjectInference.Var(1); //ObjIn
-        ObjectInference.Var o2 = new ObjectInference.Var(2); //Old mapping
-        ObjectInference.Var o3 = new ObjectInference.Var(3); //New mapping
-        ObjectInference.Var o4 = new ObjectInference.Var(4); //New mapping var (Post: o3 <= o4)
+        ObjectInference.Var o1 = new ObjectInference.Var(1, new Optional<(string, SyntaxNode)>()); //ObjIn
+        ObjectInference.Var o2 = new ObjectInference.Var(2, new Optional<(string, SyntaxNode)>()); //Old mapping
+        ObjectInference.Var o3 = new ObjectInference.Var(3, new Optional<(string, SyntaxNode)>()); //New mapping
+        ObjectInference.Var o4 = new ObjectInference.Var(4, new Optional<(string, SyntaxNode)>()); //New mapping var (Post: o3 <= o4)
 
         // [];[(0, f) -> O2];[0 -> C];[0 -> A1]
         Environment In = new Environment(
             new StackEnv([]),
             new HeapEnv(ImmutableDictionary<(int, string), ObjectInference>.Empty.Add((obj1, "f"), o2)),
-            new TypeEnv(ImmutableDictionary<int, Class>.Empty.Add(obj1, obj1ClassC), []),
+            new TypeEnv(ImmutableDictionary<int, (Class, SyntaxNode)>.Empty.Add(obj1, (obj1ClassC, null)), []),
             new AliasEnv(ImmutableDictionary<int, AliasInference>.Empty.Add(obj1, obj1AliasVar))
         );
         // [];[(0, f) -> O4];[0 -> C];[0 -> A1]
         Environment Out = new Environment(
             new StackEnv([]),
             new HeapEnv(ImmutableDictionary<(int, string), ObjectInference>.Empty.Add((obj1, "f"), o4)),
-            new TypeEnv(ImmutableDictionary<int, Class>.Empty.Add(obj1, obj1ClassC), []),
+            new TypeEnv(ImmutableDictionary<int, (Class, SyntaxNode)>.Empty.Add(obj1, (obj1ClassC, null)), []),
             new AliasEnv(ImmutableDictionary<int, AliasInference>.Empty.Add(obj1, obj1AliasVarOut))
         );
 
         InferenceConstraint.HeapUpdate hu = new InferenceConstraint.HeapUpdate(Out, In, o1, "f", o3);
-        InferenceConstraint objIncl = (ObjectInference)new ObjectInference.Literal([0]) <= o1;
+        InferenceConstraint objIncl = (ObjectInference)new ObjectInference.Literal([0], new Optional<(string, SyntaxNode)>()) <= o1;
         InferenceConstraint AliasBound1 = obj1AliasLit <= obj1AliasVar;
         InferenceConstraint AliasBound2 = obj1AliasVar <= obj1AliasLit;
 
@@ -403,28 +404,28 @@ public sealed class Resolution {
         AliasInference obj1AliasVarOut = new AliasInference.Var(1);
         Class obj1ClassC = new Class("C");
 
-        ObjectInference.Var o1 = new ObjectInference.Var(1); //ObjIn
-        ObjectInference.Var o2 = new ObjectInference.Var(2); //Old mapping
-        ObjectInference.Var o3 = new ObjectInference.Var(3); //New mapping
-        ObjectInference.Var o4 = new ObjectInference.Var(4); //New mapping var (Post: o3 <= o4)
+        ObjectInference.Var o1 = new ObjectInference.Var(1, new Optional<(string, SyntaxNode)>()); //ObjIn
+        ObjectInference.Var o2 = new ObjectInference.Var(2, new Optional<(string, SyntaxNode)>()); //Old mapping
+        ObjectInference.Var o3 = new ObjectInference.Var(3, new Optional<(string, SyntaxNode)>()); //New mapping
+        ObjectInference.Var o4 = new ObjectInference.Var(4, new Optional<(string, SyntaxNode)>()); //New mapping var (Post: o3 <= o4)
 
         // [];[(0, f) -> O2];[0 -> C];[0 -> A1]
         Environment In = new Environment(
             new StackEnv([]),
             new HeapEnv(ImmutableDictionary<(int, string), ObjectInference>.Empty.Add((obj1, "f"), o2)),
-            new TypeEnv(ImmutableDictionary<int, Class>.Empty.Add(obj1, obj1ClassC), []),
+            new TypeEnv(ImmutableDictionary<int, (Class, SyntaxNode)>.Empty.Add(obj1, (obj1ClassC, null)), []),
             new AliasEnv(ImmutableDictionary<int, AliasInference>.Empty.Add(obj1, obj1AliasVar))
         );
         // [];[(0, f) -> O4];[0 -> C];[0 -> A1]
         Environment Out = new Environment(
             new StackEnv([]),
             new HeapEnv(ImmutableDictionary<(int, string), ObjectInference>.Empty.Add((obj1, "f"), o4)),
-            new TypeEnv(ImmutableDictionary<int, Class>.Empty.Add(obj1, obj1ClassC), []),
+            new TypeEnv(ImmutableDictionary<int, (Class, SyntaxNode)>.Empty.Add(obj1, (obj1ClassC, null)), []),
             new AliasEnv(ImmutableDictionary<int, AliasInference>.Empty.Add(obj1, obj1AliasVarOut))
         );
 
         InferenceConstraint.HeapUpdate hu = new InferenceConstraint.HeapUpdate(Out, In, o1, "f", o3);
-        InferenceConstraint objIncl = (ObjectInference)new ObjectInference.Literal([0]) <= o1;
+        InferenceConstraint objIncl = (ObjectInference)new ObjectInference.Literal([0], new Optional<(string, SyntaxNode)>()) <= o1;
         InferenceConstraint AliasBound1 = obj1AliasLit <= obj1AliasVar;
         InferenceConstraint AliasBound2 = obj1AliasVar <= obj1AliasLit;
 
@@ -464,32 +465,32 @@ public sealed class Resolution {
         AliasInference obj1AliasVarOut = new AliasInference.Var(1);
         Class obj1ClassC = new Class("C");
 
-        ObjectInference.Var o1 = new ObjectInference.Var(1); //ObjIn
-        ObjectInference.Var o2 = new ObjectInference.Var(2); //Old (0, f) mapping
-        ObjectInference.Var o3 = new ObjectInference.Var(3); //New (0, f) mapping
-        ObjectInference.Var o4 = new ObjectInference.Var(4); //New (0, f) mapping var (Post: o3 <= o4)
-        ObjectInference.Var o5 = new ObjectInference.Var(5); //Old (1, f) mapping
-        ObjectInference.Var o6 = new ObjectInference.Var(6); //New (1, f) mapping
-        ObjectInference.Var o7 = new ObjectInference.Var(7); //Old (1, g) mapping
-        ObjectInference.Var o8 = new ObjectInference.Var(8); //New (1, g) mapping
+        ObjectInference.Var o1 = new ObjectInference.Var(1, new Optional<(string, SyntaxNode)>()); //ObjIn
+        ObjectInference.Var o2 = new ObjectInference.Var(2, new Optional<(string, SyntaxNode)>()); //Old (0, f) mapping
+        ObjectInference.Var o3 = new ObjectInference.Var(3, new Optional<(string, SyntaxNode)>()); //New (0, f) mapping
+        ObjectInference.Var o4 = new ObjectInference.Var(4, new Optional<(string, SyntaxNode)>()); //New (0, f) mapping var (Post: o3 <= o4)
+        ObjectInference.Var o5 = new ObjectInference.Var(5, new Optional<(string, SyntaxNode)>()); //Old (1, f) mapping
+        ObjectInference.Var o6 = new ObjectInference.Var(6, new Optional<(string, SyntaxNode)>()); //New (1, f) mapping
+        ObjectInference.Var o7 = new ObjectInference.Var(7, new Optional<(string, SyntaxNode)>()); //Old (1, g) mapping
+        ObjectInference.Var o8 = new ObjectInference.Var(8, new Optional<(string, SyntaxNode)>()); //New (1, g) mapping
 
         // [];[(0, f) -> O2, (1, f) -> O5, (1, g) -> O7];[0 -> C];[0 -> A1]
         Environment In = new Environment(
             new StackEnv([]),
             new HeapEnv(ImmutableDictionary<(int, string), ObjectInference>.Empty.Add((obj1, "f"), o2).Add((obj2, "f"), o5).Add((obj2, "g"), o7)),
-            new TypeEnv(ImmutableDictionary<int, Class>.Empty.Add(obj1, obj1ClassC), []),
+            new TypeEnv(ImmutableDictionary<int, (Class, SyntaxNode)>.Empty.Add(obj1, (obj1ClassC, null)), []),
             new AliasEnv(ImmutableDictionary<int, AliasInference>.Empty.Add(obj1, obj1AliasVar))
         );
         // [];[(0, f) -> O4, (1, f) -> O6, (1, g) -> O7];[0 -> C];[0 -> A2]
         Environment Out = new Environment(
             new StackEnv([]),
             new HeapEnv(ImmutableDictionary<(int, string), ObjectInference>.Empty.Add((obj1, "f"), o4).Add((obj2, "f"), o6).Add((obj2, "g"), o8)),
-            new TypeEnv(ImmutableDictionary<int, Class>.Empty.Add(obj1, obj1ClassC), []),
+            new TypeEnv(ImmutableDictionary<int, (Class, SyntaxNode)>.Empty.Add(obj1, (obj1ClassC, null)), []),
             new AliasEnv(ImmutableDictionary<int, AliasInference>.Empty.Add(obj1, obj1AliasVarOut))
         );
 
         InferenceConstraint.HeapUpdate hu = new InferenceConstraint.HeapUpdate(Out, In, o1, "f", o3);
-        InferenceConstraint objIncl = (ObjectInference)new ObjectInference.Literal([0]) <= o1;
+        InferenceConstraint objIncl = (ObjectInference)new ObjectInference.Literal([0], new Optional<(string, SyntaxNode)>()) <= o1;
         //InferenceConstraint AliasBound1 = obj1AliasLit <= obj1AliasVar;
         //InferenceConstraint AliasBound2 = obj1AliasVar <= obj1AliasLit;
 
@@ -527,20 +528,20 @@ public sealed class Resolution {
         AliasInference obj1AliasVarOut = new AliasInference.Var(1);
         Class obj1ClassC = new Class("C");
 
-        ObjectInference.Var o1 = new ObjectInference.Var(1); //ObjIn
-        ObjectInference.Var o2 = new ObjectInference.Var(2); //ObjOut
-        ObjectInference.Var o3 = new ObjectInference.Var(3); //New (0, f) mapping
+        ObjectInference.Var o1 = new ObjectInference.Var(1, new Optional<(string, SyntaxNode)>()); //ObjIn
+        ObjectInference.Var o2 = new ObjectInference.Var(2, new Optional<(string, SyntaxNode)>()); //ObjOut
+        ObjectInference.Var o3 = new ObjectInference.Var(3, new Optional<(string, SyntaxNode)>()); //New (0, f) mapping
 
         // [];[(0, f) -> O3];[0 -> C];[0 -> A1]
         Environment In = new Environment(
             new StackEnv([]),
             new HeapEnv(ImmutableDictionary<(int, string), ObjectInference>.Empty.Add((obj1, "f"), o3)),
-            new TypeEnv(ImmutableDictionary<int, Class>.Empty.Add(obj1, obj1ClassC), []),
+            new TypeEnv(ImmutableDictionary<int, (Class, SyntaxNode)>.Empty.Add(obj1, (obj1ClassC, null)), []),
             new AliasEnv(ImmutableDictionary<int, AliasInference>.Empty.Add(obj1, obj1AliasVar))
         );
 
         InferenceConstraint.HeapLookup hl = new InferenceConstraint.HeapLookup(o2, In, o1, "f");
-        InferenceConstraint objIncl = (ObjectInference)new ObjectInference.Literal([0]) <= o1;
+        InferenceConstraint objIncl = (ObjectInference)new ObjectInference.Literal([0], new Optional<(string, SyntaxNode)>()) <= o1;
 
         IEnumerable<InferenceConstraint> cons = [
                 hl,
@@ -576,21 +577,21 @@ public sealed class Resolution {
         AliasInference obj1AliasVarOut = new AliasInference.Var(1);
         Class obj1ClassC = new Class("C");
 
-        ObjectInference.Var o1 = new ObjectInference.Var(1); //ObjIn
-        ObjectInference.Var o2 = new ObjectInference.Var(2); //ObjOut
-        ObjectInference.Var o3 = new ObjectInference.Var(3); //New (0, f) mapping
-        TypeInference.Var tOut = new TypeInference.Var(0);
+        ObjectInference.Var o1 = new ObjectInference.Var(1, new Optional<(string, SyntaxNode)>()); //ObjIn
+        ObjectInference.Var o2 = new ObjectInference.Var(2, new Optional<(string, SyntaxNode)>()); //ObjOut
+        ObjectInference.Var o3 = new ObjectInference.Var(3, new Optional<(string, SyntaxNode)>()); //New (0, f) mapping
+        TypeInference.Var tOut = new TypeInference.Var(0, new Optional<(string, SyntaxNode)>());
 
         // [];[(0, f) -> O3];[0 -> C];[0 -> A1]
         Environment In = new Environment(
             new StackEnv([]),
             new HeapEnv(ImmutableDictionary<(int, string), ObjectInference>.Empty.Add((obj1, "f"), o3)),
-            new TypeEnv(ImmutableDictionary<int, Class>.Empty.Add(obj1, obj1ClassC), []),
+            new TypeEnv(ImmutableDictionary<int, (Class, SyntaxNode)>.Empty.Add(obj1, (obj1ClassC, null)), []),
             new AliasEnv(ImmutableDictionary<int, AliasInference>.Empty.Add(obj1, obj1AliasVar))
         );
 
         InferenceConstraint.TypeLookup tl = new InferenceConstraint.TypeLookup(tOut, In, o1);
-        InferenceConstraint objIncl = (ObjectInference)new ObjectInference.Literal([0]) <= o1;
+        InferenceConstraint objIncl = (ObjectInference)new ObjectInference.Literal([0], new Optional<(string, SyntaxNode)>()) <= o1;
 
         IEnumerable<InferenceConstraint> cons = [
                 tl,
@@ -605,7 +606,7 @@ public sealed class Resolution {
 
         solver.FindFixpoint();
 
-        InferenceConstraint.SubTyping tOutIncl = new InferenceConstraint.SubTyping(new TypeInference.Literal([obj1ClassC]), tOut);
+        InferenceConstraint.SubTyping tOutIncl = new InferenceConstraint.SubTyping(new TypeInference.Literal([obj1ClassC], new Optional<(string, SyntaxNode)>()), tOut);
 
         // Assert.HasCount(3, solver.Constraints.Constraints, solver.PrintConstraints()); // Contains 2 copies of 'tOutIncl'; Both are counted here despite being equal?
         Assert.Contains(tl, solver.InferenceConstraints);

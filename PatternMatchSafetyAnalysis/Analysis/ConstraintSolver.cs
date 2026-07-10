@@ -156,14 +156,14 @@ public class ConstraintSolver {
         ImmutableDictionary<int, ImmutableHashSet<AbstractObjID>> objSol = [..ReadObjSolution()
             .Select(kv => new KeyValuePair<int, ImmutableHashSet<AbstractObjID>>(kv.Key.ID, kv.Value))];
 
-        foreach (var r in Rs) {
+        foreach (InferenceConstraint.Restriction r in Rs) {
             added = added || Constraints.Add(new InferenceConstraint.ObjectInclusion(r.Out, r.In)); //RT-Bound
             if (objSol.TryGetValue(r.In.ID, out ImmutableHashSet<AbstractObjID>? value)) {
                 foreach (var o in value) {
                     added = added || Constraints.Add(new InferenceConstraint.Conditional(
-                        [new InferenceConstraint.SubTyping(r.Env.TypeMap[o], new TypeInference.Literal([r.Tau]))],
+                        [new InferenceConstraint.SubTyping(r.Env.TypeMap[o], new TypeInference.Literal([r.Tau], new Optional<(string, SyntaxNode)>()))],
                         [],
-                        [new InferenceConstraint.ObjectInclusion(new ObjectInference.Literal([o]), r.Out)]
+                        [new InferenceConstraint.ObjectInclusion(new ObjectInference.Literal([o], new Optional<(string, SyntaxNode)>()), r.Out)]
                     )); //RT-Inclusion
                 }
             }

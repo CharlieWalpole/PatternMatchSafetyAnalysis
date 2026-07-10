@@ -2,6 +2,7 @@ using Analysis.Types;
 using Environment = Analysis.Types.Environment;
 using AnalysisTests.Util;
 using System.Collections.Immutable;
+using Microsoft.CodeAnalysis;
 
 namespace AnalysisTests.DataTests.Constraints;
 
@@ -77,8 +78,8 @@ public sealed class EqualityTests { //TODO: Finish constraint types
     [TestCategory("Constraint")]
     [TestCategory("SubTyping")]
     public void SubTyping_Var01_Double() {
-        InferenceConstraint.SubTyping lc = new InferenceConstraint.SubTyping(new TypeInference.Var(0), new TypeInference.Var(1));
-        InferenceConstraint.SubTyping rc = new InferenceConstraint.SubTyping(new TypeInference.Var(0), new TypeInference.Var(1));
+        InferenceConstraint.SubTyping lc = new InferenceConstraint.SubTyping(new TypeInference.Var(0, new Optional<(string, SyntaxNode)>()), new TypeInference.Var(1, new Optional<(string, SyntaxNode)>()));
+        InferenceConstraint.SubTyping rc = new InferenceConstraint.SubTyping(new TypeInference.Var(0, new Optional<(string, SyntaxNode)>()), new TypeInference.Var(1, new Optional<(string, SyntaxNode)>()));
 
         Assert.AreEqual(lc, rc);
         Assert.AreEqual(lc.GetHashCode(), rc.GetHashCode());

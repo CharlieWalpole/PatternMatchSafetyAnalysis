@@ -189,6 +189,8 @@ public interface TypeInference : InferenceVariable {
         public override string ToString() => $"TypeVar[{ID}]";
     }
 
+    public static Literal Create(params Type[] Types) => new Literal([.. Types], new Optional<(ClassName, SyntaxNode)>());
+    public static Literal Create(IEnumerable<Type> Types) => new Literal([.. Types], new Optional<(ClassName, SyntaxNode)>());
     public static TypeInference Create(Optional<(string, SyntaxNode)> CodeSource, params Type[] Types) => new Literal([.. Types], CodeSource);
     public static Literal Create(SyntaxNode CodeSource, params Type[] Types) => new Literal([.. Types], new Optional<(ClassName, SyntaxNode)>((CodeSource.SyntaxTree.FilePath, CodeSource)));    
     public static TypeInference Create(Optional<(string, SyntaxNode)> CodeSource, IEnumerable<Type> Types) => new Literal([.. Types], CodeSource);

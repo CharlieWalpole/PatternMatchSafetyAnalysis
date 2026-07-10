@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.Data;
 using Analysis;
 using Analysis.Types;
+using Microsoft.CodeAnalysis;
 using static AnalysisTests.Util.TestDataCombinators;
 using Environment = Analysis.Types.Environment;
 using Type = Analysis.Types.Type;
@@ -49,8 +50,8 @@ public static class DataSources {
 
     #region ObjectInference
 
-    public static IEnumerable<ObjectInference.Literal> ObjectInferenceLiteral = ObjectSets.Select(objs => new ObjectInference.Literal([.. objs]));
-    public static IEnumerable<ObjectInference.Var> ObjectInferenceVar = VariableIDs.Select(id => new ObjectInference.Var(id));
+    public static IEnumerable<ObjectInference.Literal> ObjectInferenceLiteral = ObjectSets.Select(objs => new ObjectInference.Literal([.. objs], new Optional<(string, SyntaxNode)>()));
+    public static IEnumerable<ObjectInference.Var> ObjectInferenceVar = VariableIDs.Select(id => new ObjectInference.Var(id, new Optional<(string, SyntaxNode)>()));
     public static IEnumerable<ObjectInference> objectInferences = ObjectInferenceLiteral.Append<ObjectInference>(ObjectInferenceVar);
     public static IEnumerable<(ObjectInference, ObjectInference)> PairObjectInf = CartesianProd(objectInferences, objectInferences);
     public static IEnumerable<(ObjectInference, ObjectInference, ObjectInference)> TripleObjectInf = CartesianProd(objectInferences, objectInferences, objectInferences);
@@ -59,8 +60,8 @@ public static class DataSources {
 
     #region TypeInference
 
-    public static IEnumerable<TypeInference.Var> TypeInfVars = VariableIDs.Select(id => new TypeInference.Var(id));
-    public static IEnumerable<TypeInference.Literal> TypeInfLits = Types.FiniteLists().Select(ts => new TypeInference.Literal([.. ts]));
+    public static IEnumerable<TypeInference.Var> TypeInfVars = VariableIDs.Select(id => new TypeInference.Var(id, new Optional<(string, SyntaxNode)>()));
+    public static IEnumerable<TypeInference.Literal> TypeInfLits = Types.FiniteLists().Select(ts => new TypeInference.Literal([.. ts], new Optional<(string, SyntaxNode)>()));
     public static IEnumerable<TypeInference> TypeInfs = TypeInfVars.Append<TypeInference>(TypeInfLits);
     public static IEnumerable<(TypeInference, TypeInference)> PairTypeInf = CartesianProd(TypeInfs, TypeInfs);
     public static IEnumerable<(TypeInference, TypeInference, TypeInference)> TripleTypeInf = CartesianProd(TypeInfs, TypeInfs, TypeInfs);
@@ -124,7 +125,7 @@ public static class DataSources {
                 .Select(d => d.Select(p => new KeyValuePair<int, TypeInference>(p.Item1, p.Item2)).ToImmutableDictionary())
             );
 
-    public static IEnumerable<TypeEnv> TypeEnvs = CartesianProd(ClassMappings, ClosureMappings).Select(P => new TypeEnv(P.Item1, P.Item2));
+    public static IEnumerable<TypeEnv> TypeEnvs = CartesianProd(ClassMappings, ClosureMappings).Select(P => new TypeEnv([..P.Item1.Select(kv => new KeyValuePair<int, (Class, SyntaxNode)>(kv.Key, (kv.Value, null)))], P.Item2));
 
     #endregion
 

@@ -91,7 +91,7 @@ public class AbstractObjectIDAssigner(SemanticModel semanticModel) : CSharpSynta
         _AbstractObjectIDsToCodeLocations.Add(currentID, node);
         _CodeToID.Add(node, currentID);
         _ClosureObjects.Add(currentID);
-        TypeMap = TypeMap.SetTypeArrow(currentID, TypeInference.Create());
+        TypeMap = TypeMap.SetTypeArrow(currentID, TypeInference.Create(node));
     }
 
     public override void VisitParenthesizedLambdaExpression(ParenthesizedLambdaExpressionSyntax node) {
@@ -100,7 +100,7 @@ public class AbstractObjectIDAssigner(SemanticModel semanticModel) : CSharpSynta
         _AbstractObjectIDsToCodeLocations.Add(currentID, node);
         _CodeToID.Add(node, currentID);
         _ClosureObjects.Add(currentID);
-        TypeMap = TypeMap.SetTypeArrow(currentID, TypeInference.Create());
+        TypeMap = TypeMap.SetTypeArrow(currentID, TypeInference.Create(node));
     }
 
     public override void VisitMethodDeclaration(MethodDeclarationSyntax node) {
@@ -109,7 +109,7 @@ public class AbstractObjectIDAssigner(SemanticModel semanticModel) : CSharpSynta
         _AbstractObjectIDsToCodeLocations.Add(currentID, node);
         _CodeToID.Add(node, currentID);
         _MethodObjects.Add(currentID);
-        TypeMap = TypeMap.SetTypeArrow(currentID, TypeInference.Create());
+        TypeMap = TypeMap.SetTypeArrow(currentID, TypeInference.Create(node));
 
         base.VisitMethodDeclaration(node);
     }
@@ -120,7 +120,7 @@ public class AbstractObjectIDAssigner(SemanticModel semanticModel) : CSharpSynta
         _AbstractObjectIDsToCodeLocations.Add(currentID, node);
         _CodeToID.Add(node, currentID);
         _MethodObjects.Add(currentID);
-        TypeMap = TypeMap.SetTypeArrow(currentID, TypeInference.Create());
+        TypeMap = TypeMap.SetTypeArrow(currentID, TypeInference.Create(node));
 
         base.VisitConstructorDeclaration(node);
     }
@@ -134,7 +134,7 @@ public class AbstractObjectIDAssigner(SemanticModel semanticModel) : CSharpSynta
 
         if (node.Type.Kind() == SyntaxKind.IdentifierName) {
             string val = node.Type.ChildTokens().First().Text;
-            TypeMap = TypeMap.SetTypeClass(currentID, new Class(val));
+            TypeMap = TypeMap.SetTypeClass(currentID, new Class(val), node);
         }
         else {
             throw new Exception($"IDK: {node}");
