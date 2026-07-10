@@ -20,6 +20,7 @@ public class AnalysisVisitor : CSharpSyntaxVisitor<AnalysisResult> {
     protected CodeDelta Delta;
 
     protected Dictionary<AbstractObjID, MethodSummary> MethodSummaries = [];
+    public ImmutableDictionary<AbstractObjID, MethodSummary> MethodSummary => [.. MethodSummaries];
 
     public AnalysisVisitor(SemanticModel semanticModel, CodeDelta delta) {
         semantics = semanticModel;
@@ -29,7 +30,7 @@ public class AnalysisVisitor : CSharpSyntaxVisitor<AnalysisResult> {
     protected AnalysisResult CombineResults(IEnumerable<AnalysisResult> results, Environment Env, bool CollectReturn = true) {
         Environment In = Env;
         IEnumerable<InferenceConstraint> Cons = [];
-        ObjectInference.Var Out = ObjectInference.Create();
+        ObjectInference.Var Out = ObjectInference.Create(new Optional<(string, SyntaxNode)>());
 
         foreach (var res in results) {
             In = res.EndEnv;
@@ -45,7 +46,7 @@ public class AnalysisVisitor : CSharpSyntaxVisitor<AnalysisResult> {
     protected AnalysisResult SequenceAnalysis(IEnumerable<CSharpSyntaxNode> nodes, Environment Env, bool CollectReturn = true) {
         Environment In = Env;
         IEnumerable<InferenceConstraint> Cons = [];
-        ObjectInference.Var Out = ObjectInference.Create();
+        ObjectInference.Var Out = ObjectInference.Create(new Optional<(string, SyntaxNode)>());
 
         foreach (var item in nodes) {
             AnalysisResult res = HandleNode(item, In);
@@ -71,7 +72,7 @@ public class AnalysisVisitor : CSharpSyntaxVisitor<AnalysisResult> {
 
     protected virtual Environment MakeInitialEnvironment() => new Environment(
         new StackEnv([]),
-        new HeapEnv(Delta.HeapDomain.Select(kv => new KeyValuePair<(AbstractObjID, FieldName), ObjectSet>((kv.Item1, kv.Item2), ObjectInference.Create())).ToImmutableDictionary()),
+        new HeapEnv(Delta.HeapDomain.Select(kv => new KeyValuePair<(AbstractObjID, FieldName), ObjectSet>((kv.Item1, kv.Item2), ObjectInference.Create(new Optional<(string, SyntaxNode)>()))).ToImmutableDictionary()),
         Delta.TypeMap,
         new AliasEnv(Delta.CodeToID.Values.Select(id => new KeyValuePair<AbstractObjID, AliasInference>(id, AliasInference.Create())).ToImmutableDictionary())
     );
@@ -95,12 +96,12 @@ public class AnalysisVisitor : CSharpSyntaxVisitor<AnalysisResult> {
     public virtual ImmutableDictionary<AbstractObjID, MethodSummary> HandleAnalysisUnit(AnalysisUnit unit) => HandleAnalysisUnit(unit, MakeInitialEnvironment());
 
     public virtual ImmutableDictionary<AbstractObjID, MethodSummary> HandleAnalysisUnit(AnalysisUnit unit, Environment Env) {
-        ImmutableDictionary<VarName, ObjectInference> newFrame = [..unit.Defns.Select(decl => new KeyValuePair<VarName, ObjectInference>(decl.GetName(), ObjectInference.Create([Delta.CodeToID[decl.DeclarationNode]])))];
+        ImmutableDictionary<VarName, ObjectInference> newFrame = [..unit.Defns.Select(decl => new KeyValuePair<VarName, ObjectInference>(decl.GetName(), ObjectInference.Create([Delta.CodeToID[decl.DeclarationNode]], decl.DeclarationNode)))];
 
-        Environment In = Env.Push(newFrame.Add("this", ObjectInference.Create()));
+        Environment In = Env.Push(newFrame.Add("this", ObjectInference.Create(new Optional<(string, SyntaxNode)>())));
 
         IEnumerable<(ObjectInference.Var, AbstractObjID, AnalysisResult)> results = unit.Defns
-                .Select(decl => (decl, ObjectInference.Create()))
+                .Select(decl => (decl, ObjectInference.Create(decl.DeclarationNode)))
                 .Select(p => (p.Item2, Delta.CodeToID[p.decl.DeclarationNode], HandleMethodClosureBody(p.decl.GetBody(), p.decl.GetArgumentNames(), Delta.CodeToID[p.decl.DeclarationNode], In with { StackMap = In.StackMap.SetVar("this", p.Item2) })))
                 .Select(res => (res.Item1, res.Item2, res.Item3 with { EndEnv = res.Item3.EndEnv.Pop() }));
 
@@ -120,16 +121,16 @@ public class AnalysisVisitor : CSharpSyntaxVisitor<AnalysisResult> {
             throw new ArgumentException($"Analysing method declaration that was not assigned an Abstract Object ID. Node occurred at {decl.FullSpan}.");
         AbstractObjID Of = Delta.CodeToID[decl];
 
-        AnalysisResult ret = HandleMethodClosureBody(body, decl.GetArgumentNames(), Of, Env.Push(ImmutableDictionary<VarName, ObjectInference>.Empty.Add(decl.Identifier.ValueText, ObjectInference.Create([Of]))));
+        AnalysisResult ret = HandleMethodClosureBody(body, decl.GetArgumentNames(), Of, Env.Push(ImmutableDictionary<VarName, ObjectInference>.Empty.Add(decl.Identifier.ValueText, ObjectInference.Create([Of], decl))));
 
         return ret with { EndEnv = ret.EndEnv.Pop() };
     }
 
     protected virtual AnalysisResult HandleMethodClosureBody(CSharpSyntaxNode body, IEnumerable<VarName> ArgNames, AbstractObjID MethodID, Environment Env, bool doCaptures = true) {
         IEnumerable<VarName> Vc = body.GetFreeVariables(semantics);
-        ObjectInference Xr = ObjectInference.Create();
+        ObjectInference Xr = ObjectInference.Create(body);
         Dictionary<VarName, ObjectInference> StackEnv = ArgNames
-            .Select(n => new KeyValuePair<VarName, ObjectInference>(n, ObjectInference.Create())).ToDictionary(); //Arguments
+            .Select(n => new KeyValuePair<VarName, ObjectInference>(n, ObjectInference.Create(new Optional<(string, SyntaxNode)>()))).ToDictionary(); //Arguments
 
         if (doCaptures) {
             foreach (VarName capture in Vc) {
@@ -183,13 +184,13 @@ public class AnalysisVisitor : CSharpSyntaxVisitor<AnalysisResult> {
         if (stmt.Left is IdentifierNameSyntax v) {
             AnalysisResult res = HandleNode(stmt.Right, Env);
             if (Env.StackMap.ContainsKey(v.GetIdentifierName())) { //Stack Assignment
-                ObjectInference.Var Out = ObjectInference.Create();
+                ObjectInference.Var Out = ObjectInference.Create(stmt.Right);
                 return new AnalysisResult([.. res.Constraints, res.Return <= Out, Out <= res.Return], Out, res.EndEnv with { StackMap = res.EndEnv.StackMap.SetVar(v.Identifier.ValueText, Out) });
             }
             else { //implicit 'this' field update
                 AnalysisResult l = HandleNode(stmt.Left, Env);
                 AnalysisResult r = HandleNode(stmt.Right, l.EndEnv);
-                ObjectInference.Var Out = ObjectInference.Create();
+                ObjectInference.Var Out = ObjectInference.Create(stmt.Right);
                 Environment ret = r.EndEnv.GetFresh();
                 return new AnalysisResult(
                     [..l.Constraints, ..r.Constraints, l.Return <= Out, Out <= l.Return,
@@ -202,7 +203,7 @@ public class AnalysisVisitor : CSharpSyntaxVisitor<AnalysisResult> {
         else if (stmt.Left is MemberAccessExpressionSyntax expr) { //Heap Update
             AnalysisResult l = HandleNode(expr.Expression, Env);
             AnalysisResult r = HandleNode(stmt.Right, l.EndEnv);
-            ObjectInference.Var Out = ObjectInference.Create();
+            ObjectInference.Var Out = ObjectInference.Create(stmt.Right);
             Environment ret = r.EndEnv.GetFresh();
             return new AnalysisResult(
                 [..l.Constraints, ..r.Constraints, l.Return <= Out, Out <= l.Return,
@@ -218,7 +219,7 @@ public class AnalysisVisitor : CSharpSyntaxVisitor<AnalysisResult> {
 
     protected virtual AnalysisResult HandleVariable(IdentifierNameSyntax expr, Environment Env) {
         //Some method/field lookups may be in this case; M() and f() are syntactically identical. 
-        ObjectInference ObjRet = ObjectInference.Create();
+        ObjectInference ObjRet = ObjectInference.Create(expr);
         Environment Out = Env.GetFresh();
         string VarName = expr.GetIdentifierName();
         if (Env.StackMap.ContainsKey(VarName)) {
@@ -257,8 +258,8 @@ public class AnalysisVisitor : CSharpSyntaxVisitor<AnalysisResult> {
         if (MethodSummaries.TryGetValue(m, out MethodSummary? sum)) { //Previously Analysed method/constructor.
 
             ImmutableDictionary<InferenceVariable, InferenceVariable> freshMap = [
-          ..sum.InferenceVariables.Select(v => v is ObjectInference o ? new KeyValuePair<InferenceVariable, InferenceVariable>(o, ObjectInference.Create()) :
-                        v is TypeInference t ? new KeyValuePair<InferenceVariable, InferenceVariable>(t, TypeInference.Create()) :
+          ..sum.InferenceVariables.Select(v => v is ObjectInference o ? new KeyValuePair<InferenceVariable, InferenceVariable>(o, ObjectInference.Create(new Optional<(string, SyntaxNode)>())) :
+                        v is TypeInference t ? new KeyValuePair<InferenceVariable, InferenceVariable>(t, TypeInference.Create(new Optional<(string, SyntaxNode)>())) :
                         new KeyValuePair<InferenceVariable, InferenceVariable>(v, AliasInference.Create())
                 )
       ];
@@ -274,7 +275,7 @@ public class AnalysisVisitor : CSharpSyntaxVisitor<AnalysisResult> {
             (TypeInference)freshMap[sum.MethodType] <= Out.TypeMap[m]
             ];
 
-            return new AnalysisResult(RetCons, new ObjectInference.Literal([m]), Out);
+            return new AnalysisResult(RetCons, ObjectInference.Create([m], Delta.CodeToID.First(kv => kv.Value.Equals(m)).Key), Out);
         }
         else { // (Co-)Recursive method/constructor
             return new AnalysisResult([], Env.StackMap[Delta.GetMethodName(m)], Env);
@@ -283,9 +284,9 @@ public class AnalysisVisitor : CSharpSyntaxVisitor<AnalysisResult> {
 
     protected virtual AnalysisResult HandleThisFieldLookup(FieldName name, Environment Env) {
         ObjectInference ths = Env.StackMap["this"];
-        ObjectInference.Var X = ObjectInference.Create();
-        ObjectInference.Var Y = ObjectInference.Create();
-        ObjectInference.Var Z = ObjectInference.Create();
+        ObjectInference.Var X = ObjectInference.Create(new Optional<(string, SyntaxNode)>());
+        ObjectInference.Var Y = ObjectInference.Create(new Optional<(string, SyntaxNode)>());
+        ObjectInference.Var Z = ObjectInference.Create(new Optional<(string, SyntaxNode)>());
         Environment Out = Env.GetFresh();
 
         return new AnalysisResult([
@@ -299,8 +300,8 @@ public class AnalysisVisitor : CSharpSyntaxVisitor<AnalysisResult> {
     // Handled?: How to handle recursive constructors? Names are hard. (Should be in StackEnv as $"Constructor: {Defn.GetConstructorType()}"; Move to SyntaxHelpers?)
     protected virtual AnalysisResult HandleConstructor(ObjectCreationExpressionSyntax expr, Environment Env) {
         IEnumerable<AbstractObjID> defIDs = Delta.GetConstructorFromCreationExpression(expr);
-        ObjectInference.Var Cstr = ObjectInference.Create();
-        ObjectInference ID = ObjectInference.Create(Delta.CodeToID[expr]);
+        ObjectInference.Var Cstr = ObjectInference.Create(expr);
+        ObjectInference ID = ObjectInference.Create(expr, Delta.CodeToID[expr]);
 
         AnalysisResult res0 = CombineResults(defIDs.Select(m => HandleMethodLookup(m, Env, new Optional<ObjectInference.Var>(Cstr))), Env);
         AnalysisResult AppRes = HandleApplication(res0, expr.ArgumentList, res0.EndEnv);
@@ -318,9 +319,9 @@ public class AnalysisVisitor : CSharpSyntaxVisitor<AnalysisResult> {
     }
 
     protected virtual AnalysisResult HandleApplication(AnalysisResult functions, ArgumentListSyntax? args, Environment Env) {
-        ObjectInference.Var X = ObjectInference.Create();
-        ObjectInference.Var R = ObjectInference.Create();
-        TypeInference.Var Z = TypeInference.Create();
+        ObjectInference.Var X = ObjectInference.Create(new Optional<(string, SyntaxNode)>());
+        ObjectInference.Var R = ObjectInference.Create(new Optional<(string, SyntaxNode)>());
+        TypeInference.Var Z = TypeInference.Create(new Optional<(string, SyntaxNode)>());
         Environment G2 = Env.GetFresh();
         Environment Gr = Env.GetFresh();
 
@@ -337,8 +338,8 @@ public class AnalysisVisitor : CSharpSyntaxVisitor<AnalysisResult> {
             }
         }
 
-        ImmutableList<(ObjectInference, ObjectInference.Var)> Args = [.. ArgumentReturns.Select(arg => (arg, ObjectInference.Create()))];
-        ObjectInference.Var Of = ObjectInference.Create();
+        ImmutableList<(ObjectInference, ObjectInference.Var)> Args = [.. ArgumentReturns.Select(arg => (arg, ObjectInference.Create(new Optional<(string, SyntaxNode)>())))];
+        ObjectInference.Var Of = ObjectInference.Create(new Optional<(string, SyntaxNode)>());
 
         return new AnalysisResult(
             [
@@ -352,7 +353,7 @@ public class AnalysisVisitor : CSharpSyntaxVisitor<AnalysisResult> {
 
     protected virtual AnalysisResult HandleField(MemberAccessExpressionSyntax expr, Environment Env) { //Needs to handle both field and method lookups
         AnalysisResult res = HandleExpression(expr.Expression, Env);
-        ObjectInference.Var Z = ObjectInference.Create();
+        ObjectInference.Var Z = ObjectInference.Create(expr);
 
         var info = semantics.GetSymbolInfo(expr);
         IEnumerable<SyntaxNode> decls = info.Symbol.Cons(info.CandidateSymbols).Where(sym => sym is not null)
@@ -367,8 +368,8 @@ public class AnalysisVisitor : CSharpSyntaxVisitor<AnalysisResult> {
                 .Select(node => HandleMethodLookup(node, res.EndEnv, Z)), res.EndEnv, true);
         }
         else { //Is field lookup
-            ObjectInference.Var X = ObjectInference.Create();
-            ObjectInference.Var Y = ObjectInference.Create();
+            ObjectInference.Var X = ObjectInference.Create(new Optional<(string, SyntaxNode)>());
+            ObjectInference.Var Y = ObjectInference.Create(new Optional<(string, SyntaxNode)>());
             return new AnalysisResult(
                 [
                     res.Return <= Z, Z <= res.Return,
@@ -410,19 +411,19 @@ public class AnalysisVisitor : CSharpSyntaxVisitor<AnalysisResult> {
 
     protected virtual AnalysisResult HandleIf(IfStatementSyntax stmt, Environment Env) {
 
-        TypeInference.Var X = TypeInference.Create();
-        ObjectInference.Var Guard = ObjectInference.Create();
+        TypeInference.Var X = TypeInference.Create(stmt.Condition);
+        ObjectInference.Var Guard = ObjectInference.Create(stmt.Condition);
 
         AnalysisResult resG = HandleExpression(stmt.Condition, Env);
         AnalysisResult resIf = HandleStatement(stmt.Statement, resG.EndEnv);
 
         Environment Out = resIf.EndEnv.GetFresh();
-        ObjectInference OutObj = ObjectInference.Create();
+        ObjectInference OutObj = ObjectInference.Create(stmt);
 
         IEnumerable<InferenceConstraint> Cons = [
             resG.Return <= Guard, Guard <= resG.Return,
             new InferenceConstraint.TypeLookup(X, resG.EndEnv, Guard),
-            (TypeInference)X <= new Class("Bool"),
+            (TypeInference)X <= new Class(typeof(bool).Name),
             ..resG.Constraints,
             ..resIf.Constraints,
             ..resIf.EndEnv <= Out,
@@ -443,8 +444,8 @@ public class AnalysisVisitor : CSharpSyntaxVisitor<AnalysisResult> {
     }
 
     protected virtual AnalysisResult HandleWhile(WhileStatementSyntax stmt, Environment Env) {
-        TypeInference.Var X = TypeInference.Create();
-        ObjectInference.Var Guard = ObjectInference.Create();
+        TypeInference.Var X = TypeInference.Create(stmt.Condition);
+        ObjectInference.Var Guard = ObjectInference.Create(stmt.Condition);
 
         AnalysisResult resG = HandleExpression(stmt.Condition, Env);
 
@@ -455,7 +456,7 @@ public class AnalysisVisitor : CSharpSyntaxVisitor<AnalysisResult> {
         IEnumerable<InferenceConstraint> Cons = [
             resG.Return <= Guard, Guard <= resG.Return,
             new InferenceConstraint.TypeLookup(X, resG.EndEnv, Guard),
-            (TypeInference)X <= new Class("Bool"),
+            (TypeInference)X <= new Class(typeof(bool).Name),
             ..Body.EndEnv <= Out, ..Out <= Body.EndEnv,
             ..Body.EndEnv <= Env,
             ..resG.EndEnv <= Out,
@@ -469,13 +470,13 @@ public class AnalysisVisitor : CSharpSyntaxVisitor<AnalysisResult> {
         if (!stmt.Sections.All(c => c.Labels.All(p => p is CasePatternSwitchLabelSyntax pat && IsPatternValid(pat))))
             throw new ArgumentException($"Switch statement contains a case label that is not supported: {stmt}");
 
-        var data = stmt.Sections.SelectMany(s => s.Labels.Select(l => (GetPatternData(l), s.Statements)));
-        TypeInference branchBound = TypeInference.Create([..data.Select(kkv => kkv.Item1.Item1)]);
+        IEnumerable<((Class, string), SyntaxList<StatementSyntax> Statements)> data = stmt.Sections.SelectMany(s => s.Labels.Select(l => (GetPatternData(l), s.Statements)));
+        TypeInference branchBound = TypeInference.Create(stmt, [..data.Select(kkv => kkv.Item1.Item1)]);
 
 
         AnalysisResult expr = HandleExpression(stmt.Expression, Env);
-        ObjectInference.Var exprOut = ObjectInference.Create();
-        TypeInference.Var exprType = TypeInference.Create();
+        ObjectInference.Var exprOut = ObjectInference.Create(stmt.Expression);
+        TypeInference.Var exprType = TypeInference.Create(stmt.Expression);
 
         Environment branchOut = expr.EndEnv.GetFresh();
         HashSet<InferenceConstraint> cons = [
@@ -484,10 +485,10 @@ public class AnalysisVisitor : CSharpSyntaxVisitor<AnalysisResult> {
             new InferenceConstraint.TypeLookup(exprType, expr.EndEnv, exprOut),
             exprType <= branchBound
         ];
-        ObjectInference.Var ret = ObjectInference.Create();
+        ObjectInference.Var ret = ObjectInference.Create(stmt);
 
-        foreach (var d in data) {
-            ObjectInference.Var resOut = ObjectInference.Create();
+        foreach (((Class, string), SyntaxList<StatementSyntax> Statements) d in data) {
+            ObjectInference.Var resOut = ObjectInference.Create(new Optional<(string, SyntaxNode)>());
 
             InferenceConstraint restrict = new InferenceConstraint.Restriction(resOut, expr.EndEnv, exprOut, d.Item1.Item1);
             Environment branchIn = expr.EndEnv.Push(ImmutableDictionary<VarName, ObjectInference>.Empty.Add(d.Item1.Item2, resOut));
@@ -495,7 +496,7 @@ public class AnalysisVisitor : CSharpSyntaxVisitor<AnalysisResult> {
             AnalysisResult res = HandleSequence(d.Statements, branchIn);
             cons.Add(restrict);
             cons.Add(new InferenceConstraint.Conditional(
-                [new InferenceConstraint.SubTyping(TypeInference.Create([d.Item1.Item1]), exprType)],
+                [new InferenceConstraint.SubTyping(TypeInference.Create(new Optional<(string, SyntaxNode)>(), [d.Item1.Item1]), exprType)],
                 [],
                 [.. res.Constraints, .. res.EndEnv.Pop() <= branchOut, res.Return <= ret])
             );

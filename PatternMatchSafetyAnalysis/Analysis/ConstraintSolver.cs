@@ -1,8 +1,7 @@
 using System.Collections.Immutable;
 using System.Data;
-using System.Diagnostics;
-using System.Text;
 using Analysis.Types;
+using Microsoft.CodeAnalysis;
 
 namespace Analysis;
 
@@ -13,6 +12,10 @@ public class ConstraintSolver {
 
 
     public ImmutableHashSet<InferenceConstraint> InferenceConstraints => [..Constraints.Constraints];
+
+    public ImmutableHashSet<InferenceConstraint.PartialOrder> UnSatConstraints(InferenceVariableSolution Sol) => [..Constraints.PartialOrders
+        .Where(c => c.BothLiteral() && c.ApplySolution(Sol).IsTrivialUnsat(Delta))];
+
     public string PrintConstraints() => Constraints.PrintConstraints();
 
     public ConstraintSolver(AbstractObjectIDAssigner Delta, IEnumerable<InferenceConstraint> Constraints) {
@@ -234,7 +237,7 @@ public class ConstraintSolver {
         return added;
     }
 
-    public void FindFixpoint() {
+    public ConstraintSolver FindFixpoint() {
         bool ConstraintsChanged = true;
         // int size = Constraints.Constraints.Count();
         while (ConstraintsChanged) {
@@ -252,6 +255,7 @@ public class ConstraintSolver {
             // }
         }
         RunRules();
+        return this;
     }
 
     protected bool RunRules() =>
@@ -327,7 +331,7 @@ public class ConstraintSolver {
         return [.. AliasSol];
     }
 
-    protected InferenceVariableSolution ReadSolutionFromConstraints() => new InferenceVariableSolution(
+    public InferenceVariableSolution ReadSolutionFromConstraints() => new InferenceVariableSolution(
             ReadObjSolution(),
             ReadTypeSolution(),
             ReadAliasSolution()
@@ -335,5 +339,29 @@ public class ConstraintSolver {
 
     public bool IsTypeSafe() => Constraints.PartialOrders.Any(c => c.IsTrivialUnsat(Delta));
 
+    public IEnumerable<AnalysisError> GetAnalysisErrors() {
+        InferenceVariableSolution Sol = ReadSolutionFromConstraints();
+        if (!IsTypeSafe()) {
+            //Make & return error message
+            ImmutableHashSet<InferenceConstraint.PartialOrder> UnSatIncl = [.. UnSatConstraints(Sol).Select(c => c.Reduce())];
 
+            foreach (InferenceConstraint.PartialOrder po in UnSatIncl) {
+                if (po is InferenceConstraint.ObjectInclusion c && c.l is ObjectInference.Literal ll && c.r is ObjectInference.Literal rr && rr.CodeSource.HasValue) {
+                    foreach (int o in ll.Objects) {
+                        SyntaxNode Source = Delta.AbstractObjectIDsToCodeLocations[o];
+                        yield return new AnalysisError(Source.SyntaxTree.FilePath, Source, rr.CodeSource.Value.Item1, rr.CodeSource.Value.Item2);
+                    }
+                }
+                else if (po is InferenceConstraint.SubTyping tc && tc.l is TypeInference.Literal tll && tc.r is TypeInference.Literal trr && tll.CodeSource.HasValue && trr.CodeSource.HasValue) {
+                    foreach (Types.Type t in tll.Types) {
+                        yield return new AnalysisError(tll.CodeSource.Value.Item1, tll.CodeSource.Value.Item2, trr.CodeSource.Value.Item1, trr.CodeSource.Value.Item2);
+                    }
+                    // } else if (po is InferenceConstraint.AliasBounding ac && ac.l is AliasInference.Literal all && ac.r is TypeInference.Literal arr && all.CodeSource.HasValue && arr.CodeSource.HasValue) {  
+                }
+                else {
+                    throw new Exception($"Found type error but constraint form was incorrect: {po}.");
+                }
+            }
+        }
+    }
 }

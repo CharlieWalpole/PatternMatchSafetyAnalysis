@@ -20,7 +20,7 @@ public class ResolutionConstraintHandler {
     public HashSet<InferenceConstraint.Conditional> Conditionals { get; } = new HashSet<InferenceConstraint.Conditional>();
 
 
-    public IEnumerable<InferenceConstraint> PartialOrders => ObjectInclusions.Select(c => (InferenceConstraint)c)
+    public IEnumerable<InferenceConstraint.PartialOrder> PartialOrders => ObjectInclusions.Select(c => (InferenceConstraint.PartialOrder)c)
         .Append(AliasBoundings).Append(SubTypings);
 
     public IEnumerable<InferenceConstraint> Constraints => ObjectInclusions.Select(c => (InferenceConstraint)c)

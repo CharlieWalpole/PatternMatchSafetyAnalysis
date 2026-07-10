@@ -30,18 +30,17 @@ public class Program {
         SyntaxTree tree = CSharpSyntaxTree.ParseText(exampleProgram);
         CompilationUnitSyntax root = tree.GetCompilationUnitRoot();
         CSharpCompilation compilation = CSharpCompilation.Create("HelloWorld").AddSyntaxTrees(tree);
-        SemanticModel semanticModel = compilation.GetSemanticModel(tree);
-        if (semanticModel is null)
-            throw new Exception("Semantic model was null.");
+        SemanticModel semanticModel = compilation.GetSemanticModel(tree) ?? throw new Exception("Semantic model was null.");
 
         AbstractObjectIDAssigner assigner = new AbstractObjectIDAssigner(semanticModel);
+
         MethodCollector collector = new MethodCollector(semanticModel);
         root.Accept(assigner);
         root.Accept(collector);
 
         foreach (var item in assigner.AbstractObjectIDsToCodeLocations) {
             if(assigner.TypeMap.isClassObj(item.Key)) {
-                Console.WriteLine($"Constructor call occurred at {item.Value} and was assigned ID {item.Key} with type {assigner.TypeMap[item.Key]}.");
+                Console.WriteLine($"Constructor call occurred at {item.Value.Span} and was assigned ID {item.Key} with type {assigner.TypeMap[item.Key]}.");
                 Console.Write($"\tID has fields: ");
                 foreach (var dom in assigner.HeapDomain) {
                     if (dom.Item1.Equals(item.Key))

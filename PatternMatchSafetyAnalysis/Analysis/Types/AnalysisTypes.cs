@@ -3,6 +3,7 @@ using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices.Marshalling;
 using System.Text;
+using Microsoft.CodeAnalysis;
 
 namespace Analysis.Types;
 
@@ -93,7 +94,7 @@ public interface InferenceVariable {
     InferenceVariable ApplySolution(InferenceVariableSolution Sol);
 }
 public interface ObjectInference : InferenceVariable {
-    public record class Literal(ImmutableHashSet<AbstractObjID> Objects) : ObjectInference {
+    public record class Literal(ImmutableHashSet<AbstractObjID> Objects, Optional<(string, SyntaxNode)> CodeSource) : ObjectInference {
         public Literal ApplySolution(InferenceVariableSolution Sol) => this;
 
         InferenceVariable InferenceVariable.ApplySolution(InferenceVariableSolution Sol) {
@@ -114,9 +115,9 @@ public interface ObjectInference : InferenceVariable {
         }
     }
 
-    public record class Var(int ID) : ObjectInference {
+    public record class Var(int ID, Optional<(string, SyntaxNode)> CodeSource) : ObjectInference {
         public Literal ApplySolution(InferenceVariableSolution Sol) =>
-            new Literal(Sol.ObjSol[this]);
+            new Literal(Sol.ObjSol[this], CodeSource);
 
         InferenceVariable InferenceVariable.ApplySolution(InferenceVariableSolution Sol) {
             return ApplySolution(Sol);
@@ -125,25 +126,28 @@ public interface ObjectInference : InferenceVariable {
         public override string ToString() => $"ObjVar[{ID}]";
     }
 
-    public static Literal Create(params AbstractObjID[] Objs) => new Literal([.. Objs]);
-    public static Literal Create(IEnumerable<AbstractObjID> Objs) => new Literal([.. Objs]);
+    public static Literal Create(Optional<(string, SyntaxNode)> CodeSource, params AbstractObjID[] Objs) => new Literal([.. Objs], CodeSource);
+    public static Literal Create(SyntaxNode CodeSource, params AbstractObjID[] Objs) => new Literal([.. Objs], new Optional<(ClassName, SyntaxNode)>((CodeSource.SyntaxTree.FilePath, CodeSource)));
+    public static Literal Create(IEnumerable<AbstractObjID> Objs, Optional<(string, SyntaxNode)> CodeSource) => new Literal([.. Objs], CodeSource);
+    public static Literal Create(IEnumerable<AbstractObjID> Objs, SyntaxNode CodeSource) => new Literal([.. Objs], new Optional<(ClassName, SyntaxNode)>((CodeSource.SyntaxTree.FilePath, CodeSource)));
     private static int currentID = 0;
-    public static Var Create() => new Var(++currentID);
-    public static Literal Empty { get; } = new Literal([]);
+    public static Var Create(Optional<(string, SyntaxNode)> CodeSource) => new Var(++currentID, CodeSource);
+    public static Var Create(SyntaxNode CodeSource) => new Var(++currentID, new Optional<(ClassName, SyntaxNode)>((CodeSource.SyntaxTree.FilePath, CodeSource)));
+    public static Literal Empty { get; } = new Literal([], new Optional<(ClassName, SyntaxNode)>());
 
     static InferenceConstraint.ObjectInclusion operator <=(ObjectInference l, ObjectInference r) => new InferenceConstraint.ObjectInclusion(l, r);
     static InferenceConstraint.ObjectInclusion operator >=(ObjectInference l, ObjectInference r) => new InferenceConstraint.ObjectInclusion(r, l);
 
-    static InferenceConstraint.ObjectInclusion operator <=(ObjectInference l, AbstractObjID r) => new InferenceConstraint.ObjectInclusion(l, new Literal([r]));
-    static InferenceConstraint.ObjectInclusion operator >=(ObjectInference l, AbstractObjID r) => new InferenceConstraint.ObjectInclusion(new Literal([r]), l);
+    static InferenceConstraint.ObjectInclusion operator <=(ObjectInference l, AbstractObjID r) => new InferenceConstraint.ObjectInclusion(l, new Literal([r], new Optional<(ClassName, SyntaxNode)>()));
+    static InferenceConstraint.ObjectInclusion operator >=(ObjectInference l, AbstractObjID r) => new InferenceConstraint.ObjectInclusion(new Literal([r], new Optional<(ClassName, SyntaxNode)>()), l);
 
-    static InferenceConstraint.ObjectInclusion operator <=(AbstractObjID l, ObjectInference r) => new InferenceConstraint.ObjectInclusion(new Literal([l]), r);
-    static InferenceConstraint.ObjectInclusion operator >=(AbstractObjID l, ObjectInference r) => new InferenceConstraint.ObjectInclusion(r, new Literal([l]));
+    static InferenceConstraint.ObjectInclusion operator <=(AbstractObjID l, ObjectInference r) => new InferenceConstraint.ObjectInclusion(new Literal([l], new Optional<(ClassName, SyntaxNode)>()), r);
+    static InferenceConstraint.ObjectInclusion operator >=(AbstractObjID l, ObjectInference r) => new InferenceConstraint.ObjectInclusion(r, new Literal([l], new Optional<(ClassName, SyntaxNode)>()));
 
     new Literal ApplySolution(InferenceVariableSolution Sol);
 }
 public interface TypeInference : InferenceVariable {
-    public record class Literal(ImmutableHashSet<Type> Types) : TypeInference {
+    public record class Literal(ImmutableHashSet<Type> Types, Optional<(string, SyntaxNode)> CodeSource) : TypeInference {
         public Literal ApplySolution(InferenceVariableSolution Sol) => this;
 
         InferenceVariable InferenceVariable.ApplySolution(InferenceVariableSolution Sol) {
@@ -170,9 +174,9 @@ public interface TypeInference : InferenceVariable {
         }
     }
 
-    public record class Var(int ID) : TypeInference {
+    public record class Var(int ID, Optional<(string, SyntaxNode)> CodeSource) : TypeInference {
         public Literal ApplySolution(InferenceVariableSolution Sol) =>
-            new Literal(Sol.TypeSol[this]);
+            new Literal(Sol.TypeSol[this], CodeSource);
 
         InferenceVariable InferenceVariable.ApplySolution(InferenceVariableSolution Sol) {
             return ApplySolution(Sol);
@@ -185,19 +189,22 @@ public interface TypeInference : InferenceVariable {
         public override string ToString() => $"TypeVar[{ID}]";
     }
 
-    public static TypeInference Create(params Type[] Types) => new Literal([.. Types]);
-    public static TypeInference Create(IEnumerable<Type> Types) => new Literal([.. Types]);
+    public static TypeInference Create(Optional<(string, SyntaxNode)> CodeSource, params Type[] Types) => new Literal([.. Types], CodeSource);
+    public static Literal Create(SyntaxNode CodeSource, params Type[] Types) => new Literal([.. Types], new Optional<(ClassName, SyntaxNode)>((CodeSource.SyntaxTree.FilePath, CodeSource)));    
+    public static TypeInference Create(Optional<(string, SyntaxNode)> CodeSource, IEnumerable<Type> Types) => new Literal([.. Types], CodeSource);
+    public static Literal Create(SyntaxNode CodeSource, IEnumerable<Type> Types) => new Literal([.. Types], new Optional<(ClassName, SyntaxNode)>((CodeSource.SyntaxTree.FilePath, CodeSource)));
     private static int currentID = 0;
-    public static Var Create() => new Var(++currentID);
+    public static Var Create(Optional<(string, SyntaxNode)> CodeSource) => new Var(++currentID, CodeSource);
+    public static Var Create(SyntaxNode CodeSource) => new Var(++currentID, new Optional<(ClassName, SyntaxNode)>((CodeSource.SyntaxTree.FilePath, CodeSource)));
 
     static InferenceConstraint operator <=(TypeInference l, TypeInference r) => new InferenceConstraint.SubTyping(l, r);
     static InferenceConstraint operator >=(TypeInference l, TypeInference r) => new InferenceConstraint.SubTyping(r, l);
 
-    static InferenceConstraint.SubTyping operator <=(TypeInference l, Type r) => new InferenceConstraint.SubTyping(l, new Literal([r]));
-    static InferenceConstraint.SubTyping operator >=(TypeInference l, Type r) => new InferenceConstraint.SubTyping(new Literal([r]), l);
+    static InferenceConstraint.SubTyping operator <=(TypeInference l, Type r) => new InferenceConstraint.SubTyping(l, new Literal([r], new Optional<(ClassName, SyntaxNode)>()));
+    static InferenceConstraint.SubTyping operator >=(TypeInference l, Type r) => new InferenceConstraint.SubTyping(new Literal([r], new Optional<(ClassName, SyntaxNode)>()), l);
 
-    static InferenceConstraint.SubTyping operator <=(Type l, TypeInference r) => new InferenceConstraint.SubTyping(new Literal([l]), r);
-    static InferenceConstraint.SubTyping operator >=(Type l, TypeInference r) => new InferenceConstraint.SubTyping(r, new Literal([l]));
+    static InferenceConstraint.SubTyping operator <=(Type l, TypeInference r) => new InferenceConstraint.SubTyping(new Literal([l], new Optional<(ClassName, SyntaxNode)>()), r);
+    static InferenceConstraint.SubTyping operator >=(Type l, TypeInference r) => new InferenceConstraint.SubTyping(r, new Literal([l], new Optional<(ClassName, SyntaxNode)>()));
 
     new Literal ApplySolution(InferenceVariableSolution Sol);
 }
@@ -241,12 +248,18 @@ public interface InferenceConstraint {
     /// </summary>
     IEnumerable<InferenceVariable> GetInferenceVariables();
 
-    public interface PartialOrder<T, L> : InferenceConstraint where T : PartialOrder<T, L> where L : InferenceVariable {
+    public interface PartialOrder : InferenceConstraint {
+        PartialOrder ApplySolution(InferenceVariableSolution Sol);
+        PartialOrder Reduce();
+        bool BoundsAbove();
+        bool BoundsBelow();
+        bool BothLiteral();
+    }
+    public interface PartialOrder<T, L> : InferenceConstraint, PartialOrder where T : PartialOrder<T, L> where L : InferenceVariable {
         L l { get; init; }
         L r { get; init; }
         static abstract T Transitivity(T l, T r);
         static virtual bool isTransitive(T l, T r) => l.r.Equals(r.l);
-        InferenceConstraint ApplySolution(InferenceVariableSolution Sol);
     }
 
     public record class ObjectInclusion(ObjectInference l, ObjectInference r) : PartialOrder<ObjectInclusion, ObjectInference> {
@@ -254,7 +267,7 @@ public interface InferenceConstraint {
         public static ObjectInclusion Transitivity(ObjectInclusion l, ObjectInclusion r) =>
             new ObjectInclusion(l.l, r.r);
 
-        public InferenceConstraint ApplySolution(InferenceVariableSolution Sol) =>
+        public PartialOrder ApplySolution(InferenceVariableSolution Sol) =>
             new ObjectInclusion(l.ApplySolution(Sol), r.ApplySolution(Sol));
 
         public bool IsTrivialUnsat(AbstractObjectIDAssigner Delta) {
@@ -273,13 +286,27 @@ public interface InferenceConstraint {
         new ObjectInclusion((ObjectInference)mapping.GetOrDefault(l, l), (ObjectInference)mapping.GetOrDefault(r, r));
 
         public IEnumerable<InferenceVariable> GetInferenceVariables() => [l, r];
+
+        public bool BoundsAbove() => l is ObjectInference.Var && r is ObjectInference.Literal;
+        public bool BoundsBelow() => r is ObjectInference.Var && l is ObjectInference.Literal;
+        public bool BothLiteral() => l is ObjectInference.Literal && r is ObjectInference.Literal;
+
+        public PartialOrder Reduce() {
+            if (l is ObjectInference.Literal ll && r is ObjectInference.Literal rr) {
+                ImmutableHashSet<AbstractObjID> lll = rr.Objects.Aggregate(ll.Objects, (acc, o) => acc.Remove(o));
+                ImmutableHashSet<AbstractObjID> rrr = [.. rr.Objects.Where(o => !ll.Objects.Contains(o))];
+                return new InferenceConstraint.ObjectInclusion(ObjectInference.Create(lll, ll.CodeSource), ObjectInference.Create(rrr, rr.CodeSource));
+            }
+            else
+                return this;
+        }
     }
     public record class AliasBounding(AliasInference l, AliasInference r) : PartialOrder<AliasBounding, AliasInference> {
         public override string ToString() => $"{l} <= {r}";
         public static AliasBounding Transitivity(AliasBounding l, AliasBounding r) =>
             new AliasBounding(l.l, r.r);
 
-        public InferenceConstraint ApplySolution(InferenceVariableSolution Sol) =>
+        public PartialOrder ApplySolution(InferenceVariableSolution Sol) =>
             new AliasBounding(l.ApplySolution(Sol), r.ApplySolution(Sol));
 
         public bool IsTrivialUnsat(AbstractObjectIDAssigner Delta) =>
@@ -292,6 +319,12 @@ public interface InferenceConstraint {
         new AliasBounding((AliasInference)mapping.GetOrDefault(l, l), (AliasInference)mapping.GetOrDefault(r, r));
 
         public IEnumerable<InferenceVariable> GetInferenceVariables() => [l, r];
+
+        public bool BoundsAbove() => l is AliasInference.Var && r is AliasInference.Literal;
+        public bool BoundsBelow() => r is AliasInference.Var && l is AliasInference.Literal;
+        public bool BothLiteral() => l is AliasInference.Literal && r is AliasInference.Literal;
+
+        public PartialOrder Reduce() => this;
     }
     public record class SubTyping(TypeInference l, TypeInference r) : PartialOrder<SubTyping, TypeInference> {
         public static SubTyping Transitivity(SubTyping l, SubTyping r) =>
@@ -303,7 +336,7 @@ public interface InferenceConstraint {
 
         public override string ToString() => $"{l} <= {r}";
 
-        public InferenceConstraint ApplySolution(InferenceVariableSolution Sol) =>
+        public PartialOrder ApplySolution(InferenceVariableSolution Sol) =>
             new SubTyping(l.ApplySolution(Sol), r.ApplySolution(Sol));
 
         public bool IsTrivialUnsat(AbstractObjectIDAssigner Delta) {
@@ -330,6 +363,20 @@ public interface InferenceConstraint {
         new SubTyping((TypeInference)mapping.GetOrDefault(l, l), (TypeInference)mapping.GetOrDefault(l, l));
 
         public IEnumerable<InferenceVariable> GetInferenceVariables() => [l, r];
+
+        public bool BoundsAbove() => l is TypeInference.Var && r is TypeInference.Literal;
+        public bool BoundsBelow() => r is TypeInference.Var && l is TypeInference.Literal;
+        public bool BothLiteral() => l is TypeInference.Literal && r is TypeInference.Literal;
+
+        public PartialOrder Reduce() {
+            if (l is TypeInference.Literal ll && r is TypeInference.Literal rr) {
+                ImmutableHashSet<Type> lll = rr.Types.Aggregate(ll.Types, (acc, o) => acc.Remove(o)); //TODO: Does not include subtyping.
+                ImmutableHashSet<Type> rrr = [.. rr.Types.Where(o => !ll.Types.Contains(o))]; //TODO: Does not include subtyping.
+                return new InferenceConstraint.SubTyping(TypeInference.Create(ll.CodeSource, lll), TypeInference.Create(rr.CodeSource, rrr));
+            }
+            else
+                return this;
+        }
     }
     public record class HeapLookup(ObjectInference.Var Out, Environment Env, ObjectInference.Var Obj, FieldName Name) : InferenceConstraint {
         public IEnumerable<InferenceVariable> GetInferenceVariables() => Env.GetInferenceVariables().Append([Out, Obj]);

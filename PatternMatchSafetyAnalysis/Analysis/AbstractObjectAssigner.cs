@@ -9,9 +9,9 @@ using System.Reflection;
 namespace Analysis;
 
 public class AbstractObjectIDAssigner(SemanticModel semanticModel) : CSharpSyntaxWalker {
-    protected Dictionary<AbstractObjID, TextSpan> _AbstractObjectIDsToCodeLocations = [];
-    protected Optional<ImmutableDictionary<AbstractObjID, TextSpan>> __AbstractObjectIDsToCodeLocations = new();
-    public ImmutableDictionary<AbstractObjID, TextSpan> AbstractObjectIDsToCodeLocations {
+    protected Dictionary<AbstractObjID, SyntaxNode> _AbstractObjectIDsToCodeLocations = [];
+    protected Optional<ImmutableDictionary<AbstractObjID, SyntaxNode>> __AbstractObjectIDsToCodeLocations = new();
+    public ImmutableDictionary<AbstractObjID, SyntaxNode> AbstractObjectIDsToCodeLocations {
         get {
             if (!__AbstractObjectIDsToCodeLocations.HasValue)
                 __AbstractObjectIDsToCodeLocations = new(_AbstractObjectIDsToCodeLocations.ToImmutableDictionary());
@@ -88,7 +88,7 @@ public class AbstractObjectIDAssigner(SemanticModel semanticModel) : CSharpSynta
     public override void VisitSimpleLambdaExpression(SimpleLambdaExpressionSyntax node) {
         AbstractObjID currentID = nextID;
         nextID++;
-        _AbstractObjectIDsToCodeLocations.Add(currentID, node.Span);
+        _AbstractObjectIDsToCodeLocations.Add(currentID, node);
         _CodeToID.Add(node, currentID);
         _ClosureObjects.Add(currentID);
         TypeMap = TypeMap.SetTypeArrow(currentID, TypeInference.Create());
@@ -97,7 +97,7 @@ public class AbstractObjectIDAssigner(SemanticModel semanticModel) : CSharpSynta
     public override void VisitParenthesizedLambdaExpression(ParenthesizedLambdaExpressionSyntax node) {
         AbstractObjID currentID = nextID;
         nextID++;
-        _AbstractObjectIDsToCodeLocations.Add(currentID, node.Span);
+        _AbstractObjectIDsToCodeLocations.Add(currentID, node);
         _CodeToID.Add(node, currentID);
         _ClosureObjects.Add(currentID);
         TypeMap = TypeMap.SetTypeArrow(currentID, TypeInference.Create());
@@ -106,7 +106,7 @@ public class AbstractObjectIDAssigner(SemanticModel semanticModel) : CSharpSynta
     public override void VisitMethodDeclaration(MethodDeclarationSyntax node) {
         AbstractObjID currentID = nextID;
         nextID++;
-        _AbstractObjectIDsToCodeLocations.Add(currentID, node.Span);
+        _AbstractObjectIDsToCodeLocations.Add(currentID, node);
         _CodeToID.Add(node, currentID);
         _MethodObjects.Add(currentID);
         TypeMap = TypeMap.SetTypeArrow(currentID, TypeInference.Create());
@@ -117,7 +117,7 @@ public class AbstractObjectIDAssigner(SemanticModel semanticModel) : CSharpSynta
     public override void VisitConstructorDeclaration(ConstructorDeclarationSyntax node) {
         AbstractObjID currentID = nextID;
         nextID++;
-        _AbstractObjectIDsToCodeLocations.Add(currentID, node.Span);
+        _AbstractObjectIDsToCodeLocations.Add(currentID, node);
         _CodeToID.Add(node, currentID);
         _MethodObjects.Add(currentID);
         TypeMap = TypeMap.SetTypeArrow(currentID, TypeInference.Create());
@@ -128,7 +128,7 @@ public class AbstractObjectIDAssigner(SemanticModel semanticModel) : CSharpSynta
     public override void VisitObjectCreationExpression(ObjectCreationExpressionSyntax node) {
         AbstractObjID currentID = nextID;
         nextID++;
-        _AbstractObjectIDsToCodeLocations.Add(currentID, node.Span);
+        _AbstractObjectIDsToCodeLocations.Add(currentID, node);
         _CodeToID.Add(node, currentID);
         _ClassObjects.Add(currentID);
 
